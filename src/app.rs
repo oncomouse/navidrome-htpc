@@ -1,22 +1,21 @@
 use eframe::egui;
-use crate::config::Config;
+use crate::state::{AppState, View, FocusZone};
+use crate::focus::{handle_key, handle_arrow, FocusAction};
 
 pub struct NavidromeApp {
-    pub config: Config,
-    pub server_configured: bool,
+    pub state: AppState,
 }
 
 impl NavidromeApp {
-    pub fn new(config: Config) -> Self {
-        let server_configured = config.wizard.completed;
-        Self { config, server_configured }
+    pub fn new(state: AppState) -> Self {
+        Self { state }
     }
 }
 
 impl eframe::App for NavidromeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         crate::theme::apply_theme(ctx);
-        ctx.set_pixels_per_point(self.config.display.scale);
+        ctx.set_pixels_per_point(self.state.config.display.scale);
 
         ctx.memory_mut(|mem| {
             if let Some(id) = mem.focused() {
@@ -24,13 +23,38 @@ impl eframe::App for NavidromeApp {
             }
         });
 
+        // Keyboard dispatch
+        let keys = ctx.input(|i| (
+            i.key_pressed(egui::Key::Escape),
+            i.key_pressed(egui::Key::Enter),
+            i.key_pressed(egui::Key::Space),
+            i.key_pressed(egui::Key::ArrowUp),
+            i.key_pressed(egui::Key::ArrowDown),
+            i.key_pressed(egui::Key::ArrowLeft),
+            i.key_pressed(egui::Key::ArrowRight),
+        ));
+
+        if keys.0 {
+            // Clone focus to a local so we can pass both `&mut focus` and `&self.state`
+            // to handle_key without a double-borrow of `self.state`. (handle_key's
+            // app_state param is currently unused — reserved for later tasks — so
+            // writing the clone back is a no-op for now.)
+            let mut focus = self.state.focus.clone();
+            let action = handle_key(&mut focus, egui::Key::Escape, &self.state);
+            self.state.focus = focus;
+            if action == FocusAction::Escape {
+                if self.state.focus.menu_expanded {
+                    self.state.focus.menu_expanded = false;
+                } else {
+                    self.state.pop_view();
+                }
+            }
+        }
+        // (Full keyboard dispatch expanded in later tasks)
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Navidrome HTPC");
-            if !self.server_configured {
-                ui.label("Wizard goes here");
-            } else {
-                ui.label("Home goes here");
-            }
+            ui.label(format!("View: {:?} | Focus: {:?}", self.state.current_view(), self.state.focus.zone));
         });
     }
 }
