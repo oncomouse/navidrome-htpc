@@ -629,4 +629,62 @@ impl NavidromeApp {
             }
         }
     }
+
+    /// Global Space / Play-Pause handler (per spec §5).
+    ///
+    /// - If nothing is currently playing → start the queue from track 0:
+    ///   set `is_playing=true`, `current_track_index=Some(0)`, and push the
+    ///   NowPlaying view so the user lands on the playback screen. The mpv
+    ///   poll loop in `update()` will detect the `is_playing && !mpv_playing`
+    ///   transition and send the stream URL to mpv.
+    /// - If something is playing → toggle mpv's pause state with no view
+    ///   change. We always route through `MpvCommand::TogglePause` so mpv
+    ///   remains the source of truth for the paused flag; the next
+    ///   `mpv.poll()` will refresh `state.is_playing` accordingly.
+    ///
+    /// If the queue is empty and nothing is playing, we surface a toast
+    /// instead of silently no-op'ing — the user pressed Play and nothing
+    /// happened, which is confusing without feedback.
+    fn handle_play_pause_global(&mut self) {
+        // Already playing: toggle pause via mpv, no view change.
+        if self.state.is_playing {
+            if let Some(ref mpv) = self.mpv {
+                mpv.send(crate::mpv::MpvCommand::TogglePause);
+            }
+            return;
+        }
+
+        // Nothing playing. Need a non-empty queue to start.
+        if self.state.play_queue.is_empty() {
+            self.state.toasts.push(crate::state::Toast {
+                message: "Queue is empty — nothing to play".to_string(),
+                ttl: 2.5,
+            });
+            return;
+        }
+
+        // If we have a current track index but are paused (is_playing=false
+        // but current_track_index=Some), resume instead of restarting.
+        if let Some(idx) = self.state.current_track_index {
+            if idx < self.state.play_queue.len() {
+                self.state.is_playing = true;
+                if let Some(ref mpv) = self.mpv {
+                    mpv.send(crate::mpv::MpvCommand::Resume);
+                }
+                if self.state.current_view() != View::NowPlaying {
+                    self.state.push_view(View::NowPlaying);
+                }
+                return;
+            }
+        }
+
+        // Fresh start: kick off track 0. The mpv poll loop will see
+        // `is_playing && !mpv_playing && current_time == 0` and send the
+        // stream URL on the next frame.
+        self.state.current_track_index = Some(0);
+        self.state.is_playing = true;
+        self.state.current_time = 0.0;
+        self.state.total_duration = 0.0;
+        self.state.push_view(View::NowPlaying);
+    }
 }
