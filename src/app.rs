@@ -2,6 +2,7 @@ use eframe::egui;
 use crate::state::{AppState, View, FocusZone};
 use crate::focus::{handle_key, handle_arrow, FocusAction};
 use crate::subsonic::SubsonicClient;
+use crate::mpv::MpvController;
 
 pub struct NavidromeApp {
     pub state: AppState,
@@ -9,11 +10,18 @@ pub struct NavidromeApp {
     /// (the wizard hasn't run yet) — in that case the UI operates in an
     /// offline / placeholder mode.
     pub subsonic: Option<SubsonicClient>,
+    /// mpv subprocess controller. `None` when no server is configured or
+    /// the mpv binary failed to spawn.
+    pub mpv: Option<MpvController>,
 }
 
 impl NavidromeApp {
-    pub fn new(state: AppState, subsonic: Option<SubsonicClient>) -> Self {
-        Self { state, subsonic }
+    pub fn new(
+        state: AppState,
+        subsonic: Option<SubsonicClient>,
+        mpv: Option<MpvController>,
+    ) -> Self {
+        Self { state, subsonic, mpv }
     }
 }
 

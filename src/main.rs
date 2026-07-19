@@ -26,6 +26,15 @@ fn main() -> eframe::Result<()> {
         None
     };
 
+    // Spawn the mpv audio subprocess when a server is configured. Returns
+    // None if the `mpv` binary is missing or the IPC socket can't be opened;
+    // in that case playback is simply unavailable (UI still works).
+    let mpv = if server_configured {
+        crate::mpv::MpvController::start(config.audio.clone())
+    } else {
+        None
+    };
+
     let state = AppState {
         config: config.clone(),
         view_stack: vec![View::Home],
@@ -66,6 +75,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Navidrome HTPC",
         opts,
-        Box::new(move |_cc| Ok(Box::new(crate::app::NavidromeApp::new(state, subsonic)))),
+        Box::new(move |_cc| Ok(Box::new(crate::app::NavidromeApp::new(state, subsonic, mpv)))),
     )
 }
