@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::time::{Duration, Instant};
 use crate::state::{AppState, View, FocusZone};
 use crate::focus::{handle_key, handle_arrow, FocusAction};
 use crate::subsonic::SubsonicClient;
@@ -14,6 +15,11 @@ pub struct NavidromeApp {
     /// the mpv binary failed to spawn.
     pub mpv: Option<MpvController>,
     pub wizard: crate::ui::wizard::WizardState,
+    /// When the last search query was sent to the Subsonic client.
+    last_search_time: Option<Instant>,
+    /// The last query string that was sent, to avoid re-sending on every
+    /// frame when the query hasn't changed.
+    last_search_query: String,
 }
 
 impl NavidromeApp {
@@ -22,7 +28,14 @@ impl NavidromeApp {
         subsonic: Option<SubsonicClient>,
         mpv: Option<MpvController>,
     ) -> Self {
-        Self { state, subsonic, mpv, wizard: Default::default() }
+        Self {
+            state,
+            subsonic,
+            mpv,
+            wizard: Default::default(),
+            last_search_time: None,
+            last_search_query: String::new(),
+        }
     }
 }
 
@@ -87,7 +100,32 @@ impl eframe::App for NavidromeApp {
             _ => {}
         }
 
-        // ── Poll SubsonicClient results ────────────────────────────────────────
+        // ── Debounced search ────────────────────────────────────────────────
+        if let Some(ref subsonic) = self.subsonic {
+            let query = self.state.search_query.clone();
+            if query.len() >= 2
+                && query != self.last_search_query
+                && self
+                    .last_search_time
+                    .map(|t| t.elapsed() >= Duration::from_millis(300))
+                    .unwrap_or(true)
+            {
+                self.last_search_time = Some(Instant::now());
+                self.last_search_query = query.clone();
+                subsonic.send(crate::subsonic::commands::SubsonicCommand::Search {
+                    query,
+                    artist_count: 20,
+                    album_count: 20,
+                    song_count: 50,
+                });
+                // Reset search results so a new query clears stale data
+                self.state.search_results_artists.clear();
+                self.state.search_results_albums.clear();
+                self.state.search_results_tracks.clear();
+            }
+        }
+
+        // ── Keyboard dispatch ─────────────────────────────────────────────────
         if let Some(ref subsonic) = self.subsonic {
             let results = subsonic.poll();
             if let Some(albums) = results.recent_albums {
@@ -116,6 +154,11 @@ impl eframe::App for NavidromeApp {
             if let Some((playlist, tracks)) = results.playlist_detail {
                 self.state.current_playlist = Some(playlist);
                 self.state.current_playlist_tracks = tracks;
+            }
+            if let Some(sr) = results.search_results {
+                self.state.search_results_artists = sr.artists;
+                self.state.search_results_albums = sr.albums;
+                self.state.search_results_tracks = sr.tracks;
             }
             if let Some(ref err) = results.error {
                 self.state.toasts.push(crate::state::Toast { message: err.clone(), ttl: 3.0 });
