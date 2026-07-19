@@ -23,6 +23,22 @@ pub enum FocusZone {
     Transport,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ArtistSort {
+    #[default]
+    Alphabetical,
+    ByAlbumCount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum AlbumSort {
+    #[default]
+    Newest,
+    AlphabeticalByName,
+    AlphabeticalByArtist,
+    Random,
+}
+
 #[derive(Debug, Clone)]
 pub struct FocusState {
     pub zone: FocusZone,
@@ -51,6 +67,10 @@ pub struct AppState {
     pub view_stack: Vec<View>,
     pub focus: FocusState,
     pub server_configured: bool,
+
+    // Sort state
+    pub artist_sort: ArtistSort,
+    pub album_sort: AlbumSort,
 
     // Data (populated by Subsonic client thread)
     pub recent_albums: Vec<Album>,

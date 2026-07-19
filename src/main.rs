@@ -40,6 +40,8 @@ fn main() -> eframe::Result<()> {
         view_stack: vec![View::Home],
         focus: Default::default(),
         server_configured,
+        artist_sort: Default::default(),
+        album_sort: Default::default(),
         recent_albums: Vec::new(),
         recent_played: Vec::new(),
         artists: Vec::new(),

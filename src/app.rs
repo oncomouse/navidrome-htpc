@@ -36,18 +36,55 @@ impl eframe::App for NavidromeApp {
             return;
         }
 
-        // ── Fetch recent albums/played on Home entry ──────────────────────────
-        if self.state.current_view() == crate::state::View::Home
-            && self.state.recent_albums.is_empty()
-        {
-            if let Some(ref subsonic) = self.subsonic {
-                subsonic.send(
-                    crate::subsonic::commands::SubsonicCommand::GetRecentlyAdded { limit: 20 },
-                );
-                subsonic.send(
-                    crate::subsonic::commands::SubsonicCommand::GetRecentlyPlayed { limit: 20 },
-                );
+        // ── Fetch data on view entry ──────────────────────────────────────────
+        match self.state.current_view() {
+            crate::state::View::Home if self.state.recent_albums.is_empty() => {
+                if let Some(ref subsonic) = self.subsonic {
+                    subsonic.send(crate::subsonic::commands::SubsonicCommand::GetRecentlyAdded { limit: 20 });
+                    subsonic.send(crate::subsonic::commands::SubsonicCommand::GetRecentlyPlayed { limit: 20 });
+                }
             }
+            crate::state::View::AlbumList if self.state.albums.is_empty() => {
+                if let Some(ref subsonic) = self.subsonic {
+                    subsonic.send(crate::subsonic::commands::SubsonicCommand::GetAlbumList {
+                        sort: crate::subsonic::commands::SortType::Newest,
+                        offset: 0,
+                        limit: 100,
+                    });
+                }
+            }
+            crate::state::View::ArtistList if self.state.artists.is_empty() => {
+                if let Some(ref subsonic) = self.subsonic {
+                    subsonic.send(crate::subsonic::commands::SubsonicCommand::GetArtists);
+                }
+            }
+            crate::state::View::PlaylistList if self.state.playlists.is_empty() => {
+                if let Some(ref subsonic) = self.subsonic {
+                    subsonic.send(crate::subsonic::commands::SubsonicCommand::GetPlaylists);
+                }
+            }
+            crate::state::View::AlbumDetail if self.state.current_album_tracks.is_empty() => {
+                if let Some(ref album) = self.state.current_album {
+                    if let Some(ref subsonic) = self.subsonic {
+                        subsonic.send(crate::subsonic::commands::SubsonicCommand::GetAlbumDetail { id: album.id.clone() });
+                    }
+                }
+            }
+            crate::state::View::ArtistDetail if self.state.current_artist_albums.is_empty() => {
+                if let Some(ref artist) = self.state.current_artist {
+                    if let Some(ref subsonic) = self.subsonic {
+                        subsonic.send(crate::subsonic::commands::SubsonicCommand::GetArtistDetail { id: artist.id.clone() });
+                    }
+                }
+            }
+            crate::state::View::PlaylistDetail if self.state.current_playlist_tracks.is_empty() => {
+                if let Some(ref playlist) = self.state.current_playlist {
+                    if let Some(ref subsonic) = self.subsonic {
+                        subsonic.send(crate::subsonic::commands::SubsonicCommand::GetPlaylistDetail { id: playlist.id.clone() });
+                    }
+                }
+            }
+            _ => {}
         }
 
         // ── Poll SubsonicClient results ────────────────────────────────────────
@@ -59,10 +96,29 @@ impl eframe::App for NavidromeApp {
             if let Some(albums) = results.recent_played {
                 self.state.recent_played = albums;
             }
+            if let Some(albums) = results.album_list {
+                self.state.albums = albums;
+            }
+            if let Some(artists) = results.artists {
+                self.state.artists = artists;
+            }
+            if let Some(playlists) = results.playlists {
+                self.state.playlists = playlists;
+            }
+            if let Some((album, tracks)) = results.album_detail {
+                self.state.current_album = Some(album);
+                self.state.current_album_tracks = tracks;
+            }
+            if let Some((artist, albums)) = results.artist_detail {
+                self.state.current_artist = Some(artist);
+                self.state.current_artist_albums = albums;
+            }
+            if let Some((playlist, tracks)) = results.playlist_detail {
+                self.state.current_playlist = Some(playlist);
+                self.state.current_playlist_tracks = tracks;
+            }
             if let Some(ref err) = results.error {
-                self.state
-                    .toasts
-                    .push(crate::state::Toast { message: err.clone(), ttl: 3.0 });
+                self.state.toasts.push(crate::state::Toast { message: err.clone(), ttl: 3.0 });
             }
         }
 
@@ -103,16 +159,17 @@ impl eframe::App for NavidromeApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Render home view if that's the current view
-            if self.state.current_view() == crate::state::View::Home {
-                crate::ui::home::render(ui, &mut self.state);
-            } else {
-                ui.heading("Navidrome HTPC");
-                ui.label(format!(
-                    "View: {:?} | Focus: {:?}",
-                    self.state.current_view(),
-                    self.state.focus.zone
-                ));
+            match self.state.current_view() {
+                View::Home => crate::ui::home::render(ui, &mut self.state),
+                View::ArtistList => crate::ui::artist_list::render(ui, &mut self.state),
+                View::ArtistDetail => crate::ui::artist_detail::render(ui, &mut self.state),
+                View::AlbumList => crate::ui::album_list::render(ui, &mut self.state),
+                View::AlbumDetail => crate::ui::album_detail::render(ui, &mut self.state),
+                View::PlaylistList => crate::ui::playlist_list::render(ui, &mut self.state),
+                View::PlaylistDetail => crate::ui::playlist_detail::render(ui, &mut self.state),
+                View::Search => crate::ui::search::render(ui, &mut self.state),
+                View::NowPlaying => crate::ui::now_playing::render(ui, &mut self.state),
+                View::Settings => crate::ui::settings::render(ui, &mut self.state),
             }
 
             // Render toast notifications on top of everything
