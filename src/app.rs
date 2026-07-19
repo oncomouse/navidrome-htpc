@@ -36,13 +36,37 @@ impl eframe::App for NavidromeApp {
             return;
         }
 
-        ctx.memory_mut(|mem| {
-            if let Some(id) = mem.focused() {
-                mem.surrender_focus(id);
+        // ── Fetch recent albums/played on Home entry ──────────────────────────
+        if self.state.current_view() == crate::state::View::Home
+            && self.state.recent_albums.is_empty()
+        {
+            if let Some(ref subsonic) = self.subsonic {
+                subsonic.send(
+                    crate::subsonic::commands::SubsonicCommand::GetRecentlyAdded { limit: 20 },
+                );
+                subsonic.send(
+                    crate::subsonic::commands::SubsonicCommand::GetRecentlyPlayed { limit: 20 },
+                );
             }
-        });
+        }
 
-        // Keyboard dispatch
+        // ── Poll SubsonicClient results ────────────────────────────────────────
+        if let Some(ref subsonic) = self.subsonic {
+            let results = subsonic.poll();
+            if let Some(albums) = results.recent_albums {
+                self.state.recent_albums = albums;
+            }
+            if let Some(albums) = results.recent_played {
+                self.state.recent_played = albums;
+            }
+            if let Some(ref err) = results.error {
+                self.state
+                    .toasts
+                    .push(crate::state::Toast { message: err.clone(), ttl: 3.0 });
+            }
+        }
+
+        // ── Keyboard dispatch ─────────────────────────────────────────────────
         let keys = ctx.input(|i| (
             i.key_pressed(egui::Key::Escape),
             i.key_pressed(egui::Key::Enter),
@@ -71,9 +95,28 @@ impl eframe::App for NavidromeApp {
         }
         // (Full keyboard dispatch expanded in later tasks)
 
+        // ── CentralPanel ───────────────────────────────────────────────────────
+        ctx.memory_mut(|mem| {
+            if let Some(id) = mem.focused() {
+                mem.surrender_focus(id);
+            }
+        });
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Navidrome HTPC");
-            ui.label(format!("View: {:?} | Focus: {:?}", self.state.current_view(), self.state.focus.zone));
+            // Render home view if that's the current view
+            if self.state.current_view() == crate::state::View::Home {
+                crate::ui::home::render(ui, &mut self.state);
+            } else {
+                ui.heading("Navidrome HTPC");
+                ui.label(format!(
+                    "View: {:?} | Focus: {:?}",
+                    self.state.current_view(),
+                    self.state.focus.zone
+                ));
+            }
+
+            // Render toast notifications on top of everything
+            crate::ui::common::render_toasts(ui, &mut self.state);
         });
     }
 }
