@@ -28,7 +28,23 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
 
     ui.add_space(16.0);
 
-    let albums = state.albums.clone();
+    let mut albums = state.albums.clone();
+    // Apply client-side sort to match the selected sort mode
+    match state.album_sort {
+        AlbumSort::Newest => { /* server already returns newest first */ }
+        AlbumSort::AlphabeticalByName => {
+            albums.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        }
+        AlbumSort::AlphabeticalByArtist => {
+            albums.sort_by(|a, b| a.artist_name.to_lowercase().cmp(&b.artist_name.to_lowercase())
+                .then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        }
+        AlbumSort::Random => {
+            use rand::seq::SliceRandom;
+            let mut rng = rand::rng();
+            albums.shuffle(&mut rng);
+        }
+    }
     let width = ui.available_width();
     let cols = (width / 180.0).floor().max(1.0) as usize;
 
