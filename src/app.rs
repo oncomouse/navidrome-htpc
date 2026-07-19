@@ -151,6 +151,10 @@ impl eframe::App for NavidromeApp {
         }
         // (Full keyboard dispatch expanded in later tasks)
 
+        // ── Render transport + menu before CentralPanel ────────────────────────
+        crate::ui::menu::render(ctx, &mut self.state);
+        crate::ui::transport::render(ctx, &mut self.state);
+
         // ── CentralPanel ───────────────────────────────────────────────────────
         ctx.memory_mut(|mem| {
             if let Some(id) = mem.focused() {
