@@ -1,1 +1,14 @@
-// TODO: UI rendering (home, lists, transport bar, toasts) — implemented in later tasks.
+pub mod wizard;
+pub mod home;
+pub mod common;
+pub mod transport;
+pub mod menu;
+pub mod artist_list;
+pub mod artist_detail;
+pub mod album_list;
+pub mod album_detail;
+pub mod playlist_list;
+pub mod playlist_detail;
+pub mod search;
+pub mod now_playing;
+pub mod settings;

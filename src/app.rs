@@ -13,6 +13,7 @@ pub struct NavidromeApp {
     /// mpv subprocess controller. `None` when no server is configured or
     /// the mpv binary failed to spawn.
     pub mpv: Option<MpvController>,
+    pub wizard: crate::ui::wizard::WizardState,
 }
 
 impl NavidromeApp {
@@ -21,7 +22,7 @@ impl NavidromeApp {
         subsonic: Option<SubsonicClient>,
         mpv: Option<MpvController>,
     ) -> Self {
-        Self { state, subsonic, mpv }
+        Self { state, subsonic, mpv, wizard: Default::default() }
     }
 }
 
@@ -29,6 +30,11 @@ impl eframe::App for NavidromeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         crate::theme::apply_theme(ctx);
         ctx.set_pixels_per_point(self.state.config.display.scale);
+
+        if !self.state.server_configured {
+            crate::ui::wizard::render(ctx, &mut self.state, &mut self.wizard);
+            return;
+        }
 
         ctx.memory_mut(|mem| {
             if let Some(id) = mem.focused() {
