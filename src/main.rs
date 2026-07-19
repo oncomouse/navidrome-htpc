@@ -17,6 +17,15 @@ fn main() -> eframe::Result<()> {
     let config = Config::load().unwrap_or_default();
     let server_configured = config.wizard.completed;
 
+    // Spawn the Subsonic client thread when a server is configured. The
+    // client owns its own OS thread + tokio runtime; the UI talks to it
+    // through the crossbeam channel returned in the handle.
+    let subsonic = if server_configured {
+        Some(crate::subsonic::SubsonicClient::start(config.clone()))
+    } else {
+        None
+    };
+
     let state = AppState {
         config: config.clone(),
         view_stack: vec![View::Home],
@@ -57,6 +66,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Navidrome HTPC",
         opts,
-        Box::new(move |_cc| Ok(Box::new(crate::app::NavidromeApp::new(state)))),
+        Box::new(move |_cc| Ok(Box::new(crate::app::NavidromeApp::new(state, subsonic)))),
     )
 }

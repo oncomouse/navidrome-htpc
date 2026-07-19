@@ -1,14 +1,19 @@
 use eframe::egui;
 use crate::state::{AppState, View, FocusZone};
 use crate::focus::{handle_key, handle_arrow, FocusAction};
+use crate::subsonic::SubsonicClient;
 
 pub struct NavidromeApp {
     pub state: AppState,
+    /// Subsonic client thread handle. `None` when no server is configured
+    /// (the wizard hasn't run yet) — in that case the UI operates in an
+    /// offline / placeholder mode.
+    pub subsonic: Option<SubsonicClient>,
 }
 
 impl NavidromeApp {
-    pub fn new(state: AppState) -> Self {
-        Self { state }
+    pub fn new(state: AppState, subsonic: Option<SubsonicClient>) -> Self {
+        Self { state, subsonic }
     }
 }
 
