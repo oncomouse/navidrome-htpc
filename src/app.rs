@@ -204,6 +204,37 @@ impl eframe::App for NavidromeApp {
                 });
             }
 
+            // Initial play detection: the UI set is_playing=true (e.g. from
+            // album_detail Play button) but mpv hasn't started yet (no
+            // current_time, not playing). Send the first track's URL to mpv.
+            if self.state.is_playing
+                && !mpv_state.is_playing
+                && self.state.current_time == 0.0
+                && self.state.total_duration == 0.0
+                && self.state.current_track_index.is_some()
+            {
+                if let Some(idx) = self.state.current_track_index {
+                    if idx < self.state.play_queue.len() {
+                        if let Some(ref subsonic) = self.subsonic {
+                            let track = self.state.play_queue[idx].clone();
+                            let max_bitrate = self.state.config.audio.max_bitrate;
+                            match subsonic.stream_url(&track.id, max_bitrate) {
+                                Some(url) => {
+                                    mpv.send(crate::mpv::MpvCommand::Play { url });
+                                }
+                                None => {
+                                    self.state.toasts.push(crate::state::Toast {
+                                        message: "Could not build stream URL".to_string(),
+                                        ttl: 3.0,
+                                    });
+                                    self.state.is_playing = false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Track-end transition: mpv reports is_playing=false but we were
             // playing on the previous frame. Advance the queue (when auto-
             // advance is enabled) and tell mpv to load the next URL.
