@@ -17,9 +17,10 @@ pub mod models;
 use std::sync::{Arc, RwLock};
 
 use crossbeam::channel::{self, Receiver, Sender};
+use opensubsonic::Client;
 use tokio::runtime::Runtime;
 
-use opensubsonic::{Auth, Client};
+use opensubsonic::Auth;
 use opensubsonic::data::{
     AlbumId3, AlbumWithSongsId3, ArtistId3, ArtistWithAlbumsId3, Child, Playlist as OsPlaylist,
     PlaylistWithSongs,
@@ -31,10 +32,17 @@ use crate::subsonic::commands::{FetchResults, SearchResults, SortType, SubsonicC
 /// Handle to the running Subsonic client thread.
 ///
 /// Clone-safe to keep in the egui app struct — `Sender` is `Send + Sync` and
-/// the `Arc<RwLock<…>>` is the shared result store.
+/// the `Arc<RwLock<…>>` is the shared result store. The `client` field is a
+/// clone of the same `opensubsonic::Client` the worker thread uses; it is
+/// only used for the synchronous URL builders (`stream_url`, `cover_art_url`)
+/// which don't perform I/O, so it's safe to call from the UI thread.
 pub struct SubsonicClient {
     pub command_tx: Sender<SubsonicCommand>,
     pub results: Arc<RwLock<FetchResults>>,
+    /// Synchronous handle to the URL builders. `None` if the worker thread
+    /// failed to construct the underlying `opensubsonic::Client` (in which
+    /// case `FetchResults::error` carries the connection error).
+    pub client: Option<Client>,
 }
 
 impl SubsonicClient {
@@ -49,25 +57,52 @@ impl SubsonicClient {
         let results = Arc::new(RwLock::new(FetchResults::default()));
         let results_clone = results.clone();
 
-        std::thread::spawn(move || {
-            let rt = match Runtime::new() {
-                Ok(rt) => rt,
-                Err(e) => {
-                    tracing::error!("Failed to create tokio runtime: {e}");
-                    if let Ok(mut r) = results_clone.write() {
-                        r.error = Some(format!("Runtime failed: {e}"));
+        // Try to build the opensubsonic::Client up-front so the UI thread
+        // can use its synchronous URL builders (stream_url / cover_art_url)
+        // without crossing the thread boundary. If this fails we surface
+        // the error through FetchResults::error, matching the previous
+        // behaviour where the worker thread did the same.
+        let auth = match config.server.auth_method {
+            AuthMethod::Token => Auth::token(&config.server.password),
+            AuthMethod::Plain => Auth::plain(&config.server.password),
+            AuthMethod::ApiKey => Auth::token(&config.server.api_key),
+        };
+        let client_result = Client::new(&config.server.url, &config.server.username, auth);
+
+        let client_clone = client_result.as_ref().ok().cloned();
+
+        if let Err(e) = &client_result {
+            tracing::error!("Failed to create Subsonic client: {e}");
+            if let Ok(mut r) = results.write() {
+                r.error = Some(format!("Connection failed: {e}"));
+            }
+        }
+
+        // Only spawn the worker thread if the client was constructed — a
+        // broken connection is surfaced via FetchResults::error and there's
+        // nothing for the worker to do.
+        if client_clone.is_some() {
+            std::thread::spawn(move || {
+                let rt = match Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        tracing::error!("Failed to create tokio runtime: {e}");
+                        if let Ok(mut r) = results_clone.write() {
+                            r.error = Some(format!("Runtime failed: {e}"));
+                        }
+                        return;
                     }
-                    return;
-                }
-            };
-            rt.block_on(async move {
-                run_client(config, command_rx, results_clone).await;
+                };
+                rt.block_on(async move {
+                    run_client(config, command_rx, results_clone).await;
+                });
             });
-        });
+        }
 
         Self {
             command_tx,
             results,
+            client: client_clone,
         }
     }
 
@@ -83,6 +118,26 @@ impl SubsonicClient {
             Ok(r) => r.clone(),
             Err(_) => FetchResults::default(),
         }
+    }
+
+    /// Build a streaming URL for a song synchronously, without going through
+    /// the worker thread. `max_bitrate=0` means unlimited. Returns `None`
+    /// when the underlying `opensubsonic::Client` could not be constructed
+    /// (server misconfigured) — callers should fall back to a no-op.
+    pub fn stream_url(&self, song_id: &str, max_bitrate: u32) -> Option<String> {
+        let client = self.client.as_ref()?;
+        let url = client
+            .stream_url(
+                song_id,
+                if max_bitrate > 0 {
+                    Some(max_bitrate as i32)
+                } else {
+                    None
+                },
+                None,
+            )
+            .ok()?;
+        Some(url.to_string())
     }
 }
 

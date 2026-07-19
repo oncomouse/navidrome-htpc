@@ -175,5 +175,100 @@ impl eframe::App for NavidromeApp {
             // Render toast notifications on top of everything
             crate::ui::common::render_toasts(ui, &mut self.state);
         });
+
+        // ── Poll mpv state + advance queue on track end ───────────────────────
+        // After rendering: we read the mpv subprocess's current state, sync the
+        // UI's playback fields, and detect the "track ended" transition so we
+        // can advance the play queue. We also auto-switch to the NowPlaying
+        // view the first time `is_playing` flips to true after a click on
+        // Play/Shuffle (album_detail / playlist_detail already push the
+        // NowPlaying view themselves; this is a safety net for any other
+        // trigger path).
+        if let Some(ref mpv) = self.mpv {
+            let mpv_state = mpv.poll();
+
+            // Snapshot the "was playing" flag *before* we overwrite it, so we
+            // can detect the playing → stopped transition that mpv emits as
+            // `end-file`.
+            let was_playing = self.state.is_playing;
+
+            self.state.is_playing = mpv_state.is_playing && !mpv_state.is_paused;
+            self.state.current_time = mpv_state.current_time;
+            self.state.total_duration = mpv_state.total_duration;
+
+            // If mpv crashed, surface a toast so the user knows playback died.
+            if mpv_state.crashed && was_playing {
+                self.state.toasts.push(crate::state::Toast {
+                    message: "mpv subprocess crashed — playback stopped".to_string(),
+                    ttl: 4.0,
+                });
+            }
+
+            // Track-end transition: mpv reports is_playing=false but we were
+            // playing on the previous frame. Advance the queue (when auto-
+            // advance is enabled) and tell mpv to load the next URL.
+            if !mpv_state.is_playing
+                && was_playing
+                && !mpv_state.crashed
+                && self.state.config.playback.auto_advance
+            {
+                match self.state.current_track_index {
+                    Some(idx) => {
+                        let next = idx + 1;
+                        if next < self.state.play_queue.len() {
+                            self.state.current_track_index = Some(next);
+                            self.state.current_time = 0.0;
+                            self.state.total_duration = 0.0;
+                            // Send the next track's stream URL to mpv. We
+                            // build the URL synchronously via the Subsonic
+                            // client handle (no I/O — just query-string
+                            // construction). If the URL can't be built we
+                            // leave mpv idle and surface a toast.
+                            if let Some(ref subsonic) = self.subsonic {
+                                let track = self.state.play_queue[next].clone();
+                                let max_bitrate = self.state.config.audio.max_bitrate;
+                                match subsonic.stream_url(&track.id, max_bitrate) {
+                                    Some(url) => {
+                                        mpv.send(crate::mpv::MpvCommand::Play { url });
+                                        self.state.is_playing = true;
+                                    }
+                                    None => {
+                                        self.state.toasts.push(crate::state::Toast {
+                                            message:
+                                                "Could not build stream URL for next track"
+                                                    .to_string(),
+                                            ttl: 3.0,
+                                        });
+                                        self.state.is_playing = false;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Queue exhausted
+                            self.state.is_playing = false;
+                            self.state.current_track_index = None;
+                            self.state.current_time = 0.0;
+                            self.state.total_duration = 0.0;
+                        }
+                    }
+                    None => {
+                        self.state.is_playing = false;
+                    }
+                }
+            }
+
+            // Auto-switch to NowPlaying when playback starts and we're not
+            // already showing it. Album/playlist detail views push NowPlaying
+            // themselves on Play/Shuffle clicks; this catches the mpv-driven
+            // path (e.g. queue advancement while the user is browsing another
+            // view) so the UI follows the music.
+            if self.state.is_playing
+                && !was_playing
+                && self.state.current_view() != View::NowPlaying
+                && self.state.current_track_index.is_some()
+            {
+                self.state.push_view(View::NowPlaying);
+            }
+        }
     }
 }
