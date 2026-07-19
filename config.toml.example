@@ -1,0 +1,29 @@
+[server]
+url = "https://music.local:4533"
+username = "admin"
+auth_method = "token"
+password = ""
+api_key = ""
+
+[audio]
+device = "auto"
+exclusive = true
+gapless = true
+replaygain = "album"
+max_bitrate = 0
+
+[display]
+scale = 1.5
+theme = "dark"
+
+[playback]
+scrobble = true
+auto_advance = true
+resume_on_start = true
+
+[cache]
+dir = "~/.cache/navidrome-htpc"
+cover_art_size = 300
+
+[wizard]
+completed = false
