@@ -4,6 +4,7 @@ use crate::state::{AppState, View, FocusZone};
 use crate::focus::{handle_key, handle_arrow, FocusAction};
 use crate::subsonic::SubsonicClient;
 use crate::mpv::MpvController;
+use crate::ui::common::{ContextMenuState, ContextMenuAction};
 
 pub struct NavidromeApp {
     pub state: AppState,
@@ -20,6 +21,13 @@ pub struct NavidromeApp {
     /// The last query string that was sent, to avoid re-sending on every
     /// frame when the query hasn't changed.
     last_search_query: String,
+    /// UI-only state for the Play/Shuffle/Add-to-Queue context menu flyout.
+    pub context_menu: ContextMenuState,
+    /// A context-menu action waiting on album-detail tracks to arrive from
+    /// the Subsonic client thread. Populated when the user opens the menu on
+    /// an album card whose tracks aren't loaded yet; consumed in the
+    /// `SubsonicCommand::poll` path once `album_detail` arrives.
+    pending_menu_album: Option<(String, ContextMenuAction)>,
 }
 
 impl NavidromeApp {
@@ -35,6 +43,8 @@ impl NavidromeApp {
             wizard: Default::default(),
             last_search_time: None,
             last_search_query: String::new(),
+            context_menu: ContextMenuState::default(),
+            pending_menu_album: None,
         }
     }
 }
@@ -144,8 +154,31 @@ impl eframe::App for NavidromeApp {
                 self.state.playlists = playlists;
             }
             if let Some((album, tracks)) = results.album_detail {
-                self.state.current_album = Some(album);
-                self.state.current_album_tracks = tracks;
+                // If a context-menu action is waiting for this album's tracks,
+                // apply it now (the user opened the flyout on an album card
+                // whose tracks weren't loaded yet; we sent GetAlbumDetail and
+                // stashed the pending action). The action handler will set
+                // current_album_tracks itself, so we skip the normal
+                // assignment only when the pending action consumes it.
+                let album_id = album.id.clone();
+                let pending = self
+                    .pending_menu_album
+                    .as_ref()
+                    .map(|(id, _)| id == &album_id)
+                    .unwrap_or(false);
+                if pending {
+                    self.state.current_album = Some(album);
+                    self.state.current_album_tracks = tracks.clone();
+                    let action = self
+                        .pending_menu_album
+                        .take()
+                        .map(|(_, a)| a)
+                        .unwrap();
+                    self.apply_action_to_tracks(action, tracks);
+                } else {
+                    self.state.current_album = Some(album);
+                    self.state.current_album_tracks = tracks;
+                }
             }
             if let Some((artist, albums)) = results.artist_detail {
                 self.state.current_artist = Some(artist);
@@ -194,6 +227,21 @@ impl eframe::App for NavidromeApp {
         }
         // (Full keyboard dispatch expanded in later tasks)
 
+        // ── Context menu: open on Right arrow when focused on a card/track ────
+        //
+        // When the user presses ArrowRight while focus is in the Content zone
+        // of a list/grid view, we pop the context-menu flyout anchored on the
+        // currently focused item. Detail views' header buttons (Play /
+        // Shuffle / Add to Queue) are intentionally *not* handled here — only
+        // cards and track rows open the flyout.
+        //
+        // The flyout itself consumes Up/Down/Enter/Escape/Left via
+        // `render_context_menu` below, so we only open it here; once open,
+        // normal focus-arrow dispatch is effectively paused for those keys.
+        if keys.6 && self.state.focus.zone == FocusZone::Content && !self.context_menu.open {
+            self.maybe_open_context_menu_for_focus();
+        }
+
         // ── Render transport + menu before CentralPanel ────────────────────────
         crate::ui::menu::render(ctx, &mut self.state);
         crate::ui::transport::render(ctx, &mut self.state);
@@ -222,6 +270,31 @@ impl eframe::App for NavidromeApp {
             // Render toast notifications on top of everything
             crate::ui::common::render_toasts(ui, &mut self.state);
         });
+
+        // ── Context menu flyout ───────────────────────────────────────────────
+        // Rendered as an `egui::Area` after CentralPanel so it floats above the
+        // view content. `render_context_menu` handles its own Up/Down/Enter/
+        // Escape/Left keyboard input; we only resolve the returned action
+        // here. Position: anchored near the top-left of the screen plus a
+        // small margin, so it's visible on every view regardless of where the
+        // pointer is. (A future polish could anchor it next to the focused
+        // widget, but egui doesn't expose focus widget rects cheaply.)
+        if self.context_menu.open {
+            let pos = ctx
+                .input(|i| i.pointer.latest_pos())
+                .unwrap_or_else(|| egui::pos2(120.0, 120.0));
+            // Clamp so the 200x120 menu stays on-screen.
+            let screen = ctx.screen_rect();
+            let clamped = egui::pos2(
+                pos.x.min(screen.max.x - 210.0).max(screen.min.x + 8.0),
+                pos.y.min(screen.max.y - 130.0).max(screen.min.y + 8.0),
+            );
+            if let Some(action) =
+                crate::ui::common::render_context_menu(ctx, &mut self.context_menu, clamped)
+            {
+                self.handle_context_menu_action(action);
+            }
+        }
 
         // ── Poll mpv state + advance queue on track end ───────────────────────
         // After rendering: we read the mpv subprocess's current state, sync the
@@ -346,6 +419,213 @@ impl eframe::App for NavidromeApp {
                 && self.state.current_track_index.is_some()
             {
                 self.state.push_view(View::NowPlaying);
+            }
+        }
+    }
+}
+
+// ── Context-menu helpers ─────────────────────────────────────────────────────
+//
+// These methods live on `NavidromeApp` rather than inline in `update()` so the
+// keyboard-dispatch and action-resolution logic stays readable. They assume
+// `self.state` and `self.context_menu` are the only state they touch (plus
+// `self.subsonic` / `self.pending_menu_album` for the async album-fetch path).
+
+impl NavidromeApp {
+    /// Open the context-menu flyout for the currently focused item, if it's a
+    /// card or track row in one of the views that supports the flyout. No-op
+    /// for views with explicit header buttons (which rely on those buttons
+    /// instead) or when the focused index is out of range.
+    fn maybe_open_context_menu_for_focus(&mut self) {
+        let view = self.state.current_view();
+        let row = self.state.focus.content_row;
+        let col = self.state.focus.content_col;
+
+        match view {
+            View::AlbumList => {
+                if let Some(album) = self.state.albums.get(row) {
+                    self.context_menu.open_for_album(album.id.clone());
+                }
+            }
+            View::Home => match row {
+                // Row 0 = navigation cards (Artists/Albums/Playlists): no menu.
+                1 => {
+                    if let Some(album) = self.state.recent_albums.get(col) {
+                        self.context_menu.open_for_album(album.id.clone());
+                    }
+                }
+                2 => {
+                    if let Some(album) = self.state.recent_played.get(col) {
+                        self.context_menu.open_for_album(album.id.clone());
+                    }
+                }
+                _ => {}
+            },
+            View::AlbumDetail => {
+                if row < self.state.current_album_tracks.len() {
+                    self.context_menu.open_for_track(row);
+                }
+            }
+            View::PlaylistDetail => {
+                if row < self.state.current_playlist_tracks.len() {
+                    self.context_menu.open_for_track(row);
+                }
+            }
+            // Other views (ArtistList, ArtistDetail, PlaylistList, Search,
+            // NowPlaying, Settings) don't surface the context-menu flyout in
+            // this task; their cards are navigation-only or have dedicated
+            // controls.
+            _ => {}
+        }
+    }
+
+    /// Resolve a `ContextMenuAction` returned by the flyout against the play
+    /// queue. For album-card triggers the tracks may not be loaded yet, in
+    /// which case we kick off a `GetAlbumDetail` fetch and defer the action
+    /// until the results arrive (see `pending_menu_album` handling in the
+    /// poll path). For track-row triggers the tracks are already in
+    /// `current_album_tracks` / `current_playlist_tracks`.
+    fn handle_context_menu_action(&mut self, action: ContextMenuAction) {
+        // Track-row trigger: act on the row's containing track list.
+        if let Some(idx) = self.context_menu.track_index {
+            let view = self.state.current_view();
+            match view {
+                View::AlbumDetail => {
+                    let tracks = self.state.current_album_tracks.clone();
+                    self.apply_action_to_track_in_list(action, &tracks, idx);
+                }
+                View::PlaylistDetail => {
+                    let tracks = self.state.current_playlist_tracks.clone();
+                    self.apply_action_to_track_in_list(action, &tracks, idx);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Album-card trigger: we need the album's tracks. If we already have
+        // them (current_album matches), apply immediately; otherwise fetch.
+        if let Some(album_id) = self.context_menu.album_id.clone() {
+            let have_tracks = self
+                .state
+                .current_album
+                .as_ref()
+                .map(|a| a.id == album_id && !self.state.current_album_tracks.is_empty())
+                .unwrap_or(false);
+            if have_tracks {
+                let tracks = self.state.current_album_tracks.clone();
+                self.apply_action_to_tracks(action, tracks);
+            } else {
+                // Defer: fetch album detail, stash the pending action.
+                if let Some(ref subsonic) = self.subsonic {
+                    subsonic.send(crate::subsonic::commands::SubsonicCommand::GetAlbumDetail {
+                        id: album_id.clone(),
+                    });
+                    self.pending_menu_album = Some((album_id, action));
+                    self.state.toasts.push(crate::state::Toast {
+                        message: "Loading album…".to_string(),
+                        ttl: 1.5,
+                    });
+                } else {
+                    self.state.toasts.push(crate::state::Toast {
+                        message: "No server — can't load album".to_string(),
+                        ttl: 3.0,
+                    });
+                }
+            }
+        }
+    }
+
+    /// Apply a context-menu action to a full track list (album-card trigger).
+    /// `PlayNow` replaces the queue starting from track 0; `Shuffle` replaces
+    /// the queue with a shuffled copy; `AddToQueue` appends to the current
+    /// queue and surfaces a toast.
+    fn apply_action_to_tracks(
+        &mut self,
+        action: ContextMenuAction,
+        tracks: Vec<crate::subsonic::models::Track>,
+    ) {
+        if tracks.is_empty() {
+            self.state.toasts.push(crate::state::Toast {
+                message: "No tracks to play".to_string(),
+                ttl: 2.0,
+            });
+            return;
+        }
+        match action {
+            ContextMenuAction::PlayNow => {
+                self.state.play_queue = tracks;
+                self.state.current_track_index = Some(0);
+                self.state.is_playing = true;
+                self.state.current_time = 0.0;
+                self.state.total_duration = 0.0;
+                self.state.push_view(View::NowPlaying);
+            }
+            ContextMenuAction::Shuffle => {
+                let mut tracks = tracks;
+                use rand::seq::SliceRandom;
+                let mut rng = rand::rng();
+                tracks.shuffle(&mut rng);
+                self.state.play_queue = tracks;
+                self.state.current_track_index = Some(0);
+                self.state.is_playing = true;
+                self.state.current_time = 0.0;
+                self.state.total_duration = 0.0;
+                self.state.push_view(View::NowPlaying);
+            }
+            ContextMenuAction::AddToQueue => {
+                let n = tracks.len();
+                self.state.play_queue.extend(tracks);
+                self.state.toasts.push(crate::state::Toast {
+                    message: format!("Added {n} tracks to queue"),
+                    ttl: 3.0,
+                });
+            }
+        }
+    }
+
+    /// Apply a context-menu action to a single track row within a track list
+    /// (track-row trigger). `PlayNow` replaces the queue with tracks from the
+    /// selected index onward (matching the album_detail click behaviour);
+    /// `Shuffle` replaces the queue with a shuffled copy of the full list;
+    /// `AddToQueue` appends just the one track.
+    fn apply_action_to_track_in_list(
+        &mut self,
+        action: ContextMenuAction,
+        tracks: &[crate::subsonic::models::Track],
+        idx: usize,
+    ) {
+        if tracks.is_empty() || idx >= tracks.len() {
+            return;
+        }
+        match action {
+            ContextMenuAction::PlayNow => {
+                self.state.play_queue = tracks[idx..].to_vec();
+                self.state.current_track_index = Some(0);
+                self.state.is_playing = true;
+                self.state.current_time = 0.0;
+                self.state.total_duration = 0.0;
+                self.state.push_view(View::NowPlaying);
+            }
+            ContextMenuAction::Shuffle => {
+                let mut tracks = tracks.to_vec();
+                use rand::seq::SliceRandom;
+                let mut rng = rand::rng();
+                tracks.shuffle(&mut rng);
+                self.state.play_queue = tracks;
+                self.state.current_track_index = Some(0);
+                self.state.is_playing = true;
+                self.state.current_time = 0.0;
+                self.state.total_duration = 0.0;
+                self.state.push_view(View::NowPlaying);
+            }
+            ContextMenuAction::AddToQueue => {
+                let track = tracks[idx].clone();
+                self.state.play_queue.push(track.clone());
+                self.state.toasts.push(crate::state::Toast {
+                    message: format!("Added \"{}\" to queue", track.title),
+                    ttl: 3.0,
+                });
             }
         }
     }

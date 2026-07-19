@@ -202,3 +202,161 @@ pub fn render_toasts(ui: &mut egui::Ui, state: &mut AppState) {
         state.toasts.swap_remove(*i);
     }
 }
+
+// ── Context menu (Play Now / Shuffle / Add to Queue) ──────────────────────────
+//
+// Triggered by Right arrow on a card (album thumbnail) or a track row. Not used
+// in detail views' headers where explicit Play/Shuffle/Add-to-Queue buttons
+// already exist. `album_id` is set when the menu was opened on an album card;
+// `track_index` is set when opened on a track row within the current album's
+// track list. Both may be None when the menu is closed.
+
+pub struct ContextMenuState {
+    pub open: bool,
+    /// Album the menu was opened on (None for track rows).
+    pub album_id: Option<String>,
+    /// Track index within `state.current_album_tracks` when opened on a row.
+    pub track_index: Option<usize>,
+    /// Currently highlighted item (0..3). Keyboard Up/Down adjusts this.
+    pub selected: usize,
+}
+
+impl Default for ContextMenuState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            album_id: None,
+            track_index: None,
+            selected: 0,
+        }
+    }
+}
+
+impl ContextMenuState {
+    /// Open the menu anchored on an album card (e.g. from Home / AlbumList).
+    pub fn open_for_album(&mut self, album_id: String) {
+        self.open = true;
+        self.album_id = Some(album_id);
+        self.track_index = None;
+        self.selected = 0;
+    }
+
+    /// Open the menu anchored on a track row within the current album's tracks.
+    pub fn open_for_track(&mut self, track_index: usize) {
+        self.open = true;
+        self.album_id = None;
+        self.track_index = Some(track_index);
+        self.selected = 0;
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.album_id = None;
+        self.track_index = None;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ContextMenuAction {
+    PlayNow,
+    Shuffle,
+    AddToQueue,
+}
+
+/// Render the context-menu flyout as an `egui::Area`. Returns the selected
+/// action (if any), in which case the caller is responsible for closing the
+/// menu — `render_context_menu` already sets `open = false` on selection.
+///
+/// Keyboard navigation: Up/Down moves `selected`, Enter activates, Escape/Left
+/// closes. Mouse clicks also activate.
+pub fn render_context_menu(
+    ctx: &egui::Context,
+    menu: &mut ContextMenuState,
+    pos: egui::Pos2,
+) -> Option<ContextMenuAction> {
+    if !menu.open {
+        return None;
+    }
+
+    let mut action = None;
+    let mut close = false;
+    let num_items = 3usize;
+
+    // Keyboard navigation (consumed on this frame).
+    let (pressed_up, pressed_down, pressed_enter, pressed_escape, pressed_left) = ctx.input(|i| {
+        (
+            i.key_pressed(egui::Key::ArrowUp),
+            i.key_pressed(egui::Key::ArrowDown),
+            i.key_pressed(egui::Key::Enter),
+            i.key_pressed(egui::Key::Escape),
+            i.key_pressed(egui::Key::ArrowLeft),
+        )
+    });
+
+    if pressed_up {
+        if menu.selected > 0 {
+            menu.selected -= 1;
+        }
+    }
+    if pressed_down {
+        if menu.selected + 1 < num_items {
+            menu.selected += 1;
+        }
+    }
+    if pressed_enter {
+        action = Some(match menu.selected {
+            0 => ContextMenuAction::PlayNow,
+            1 => ContextMenuAction::Shuffle,
+            _ => ContextMenuAction::AddToQueue,
+        });
+        close = true;
+    }
+    if pressed_escape || pressed_left {
+        close = true;
+    }
+
+    egui::Area::new(egui::Id::new("context_menu"))
+        .fixed_pos(pos)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            let items = ["\u{25B6} Play Now", "\u{25B6}\u{25B6} Shuffle Play", "+ Add to Queue"];
+            for (i, label) in items.iter().enumerate() {
+                let (rect, resp) = ui.allocate_exact_size(
+                    egui::vec2(200.0, 40.0),
+                    egui::Sense::click(),
+                );
+                let is_selected = i == menu.selected;
+                let bg = if is_selected || resp.hovered() {
+                    BG_HOVER
+                } else {
+                    BG_WIDGET
+                };
+                ui.painter().rect_filled(rect, 8.0, bg);
+                if is_selected {
+                    ui.painter()
+                        .rect_stroke(rect, 8.0, egui::Stroke::new(2.0, ACCENT));
+                }
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    TEXT_PRIMARY,
+                );
+                if resp.clicked_by(egui::PointerButton::Primary) {
+                    action = Some(match i {
+                        0 => ContextMenuAction::PlayNow,
+                        1 => ContextMenuAction::Shuffle,
+                        _ => ContextMenuAction::AddToQueue,
+                    });
+                    close = true;
+                }
+            }
+        });
+
+    if close {
+        menu.close();
+    }
+
+    action
+}
