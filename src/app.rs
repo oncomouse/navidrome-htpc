@@ -52,6 +52,7 @@ impl NavidromeApp {
             last_search_query: String::new(),
             context_menu: ContextMenuState::default(),
             pending_menu_album: None,
+            cover_art_cache: crate::subsonic::cover_art::CoverArtCache::new(cache_dir),
         }
     }
 }
@@ -64,6 +65,20 @@ impl eframe::App for NavidromeApp {
         if !self.state.server_configured {
             crate::ui::wizard::render(ctx, &mut self.state, &mut self.wizard);
             return;
+        }
+
+        // ── Post-wizard backend initialization ─────────────────────────────────
+        // If the wizard has completed (server_configured was just set to true)
+        // but the Subsonic / mpv backends haven't been created yet (they were
+        // None at startup because the wizard hadn't run), spin them up now.
+        if self.subsonic.is_none() {
+            self.subsonic = Some(crate::subsonic::SubsonicClient::start(
+                self.state.config.clone(),
+            ));
+        }
+        if self.mpv.is_none() {
+            self.mpv =
+                crate::mpv::MpvController::start(self.state.config.audio.clone());
         }
 
         // ── Fetch data on view entry ──────────────────────────────────────────
