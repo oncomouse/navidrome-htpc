@@ -148,6 +148,11 @@ fn run_mpv_loop(
 
         // Read events (blocking read_line; the loop sleeps 16ms between
         // iterations which is acceptable for v1 per the task brief).
+        //
+        // With the 100ms read timeout set on the IPC socket, read_event()
+        // returns Ok(None) when no event arrives within the timeout. This
+        // lets the loop check for commands and spin again instead of
+        // blocking forever when mpv is idle.
         match ipc.read_event() {
             Ok(Some(val)) => {
                 if let Some(event) = val.get("event").and_then(|e| e.as_str()) {

@@ -298,6 +298,73 @@ impl eframe::App for NavidromeApp {
             self.maybe_open_context_menu_for_focus();
         }
 
+        // ── Enter key: activate the focused item ──────────────────────────────
+        //
+        // Pressing Enter on a focused content item triggers the same action as
+        // clicking it (navigate to detail view, play from track, etc.).
+        if keys.1 && !self.context_menu.open && self.state.focus.zone == FocusZone::Content {
+            let row = self.state.focus.content_row;
+            let col = self.state.focus.content_col;
+            match self.state.current_view() {
+                View::Home => match row {
+                    // Section cards: Artists (0), Albums (1), Playlists (2)
+                    0 => match col {
+                        0 => self.state.push_view(View::ArtistList),
+                        1 => self.state.push_view(View::AlbumList),
+                        2 => self.state.push_view(View::PlaylistList),
+                        _ => {}
+                    },
+                    // Recently Added (row 1) or Recently Played (row 2)
+                    1 | 2 => {
+                        let albums = if row == 1 {
+                            &self.state.recent_albums
+                        } else {
+                            &self.state.recent_played
+                        };
+                        if let Some(album) = albums.get(col) {
+                            self.state.current_album = Some(album.clone());
+                            self.state.push_view(View::AlbumDetail);
+                        }
+                    }
+                    _ => {}
+                },
+                View::AlbumList => {
+                    if let Some(album) = self.state.albums.get(col) {
+                        self.state.current_album = Some(album.clone());
+                        self.state.push_view(View::AlbumDetail);
+                    }
+                }
+                View::AlbumDetail => {
+                    if row < self.state.current_album_tracks.len() {
+                        self.state.play_queue = self.state.current_album_tracks.clone();
+                        self.state.current_track_index = Some(row);
+                        self.state.is_playing = true;
+                        self.state.push_view(View::NowPlaying);
+                    }
+                }
+                View::ArtistList => {
+                    if let Some(artist) = self.state.artists.get(col) {
+                        self.state.current_artist = Some(artist.clone());
+                        self.state.push_view(View::ArtistDetail);
+                    }
+                }
+                View::PlaylistList => {
+                    if let Some(playlist) = self.state.playlists.get(col) {
+                        self.state.current_playlist = Some(playlist.clone());
+                        self.state.push_view(View::PlaylistDetail);
+                    }
+                }
+                View::NowPlaying => {
+                    if row < self.state.play_queue.len() {
+                        self.state.play_queue = self.state.play_queue.clone();
+                        self.state.current_track_index = Some(row);
+                        self.state.is_playing = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // ── Render transport + menu before CentralPanel ────────────────────────
         crate::ui::menu::render(ctx, &mut self.state);
         crate::ui::transport::render(ctx, &mut self.state);
@@ -405,11 +472,6 @@ impl eframe::App for NavidromeApp {
                             match subsonic.stream_url(&track.id, max_bitrate) {
                                 Some(url) => {
                                     mpv.send(crate::mpv::MpvCommand::Play { url });
-                                    // Restore is_playing so the transport icon
-                                    // shows ⏸ immediately instead of ▶ until
-                                    // mpv's start-file event arrives on the
-                                    // next frame.
-                                    self.state.is_playing = true;
                                 }
                                 None => {
                                     self.state.toasts.push(crate::state::Toast {
