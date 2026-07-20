@@ -447,6 +447,53 @@ impl eframe::App for NavidromeApp {
                 });
             }
 
+            // ── Pending transport actions ──────────────────────────────────────
+            //
+            // The transport bar click handler sets `pending_transport_action`
+            // when the user clicks play/pause/stop/next/previous. We consume it
+            // here, inside the mpv block where we have access to the mpv
+            // command channel. This is the only place mpv commands can be sent.
+            //
+            // IMPORTANT: this block MUST appear before the auto-switch logic
+            // below. The transport handler sets `state.is_playing` to the
+            // *desired* state, then the mpv poll (above) overwrites it back to
+            // mpv's current state. If auto-switch ran first it would see
+            // `!was_playing` (true, because the handler set is_playing=false)
+            // combined with `state.is_playing=true` (overwritten by poll) and
+            // spuriously push NowPlaying — the auto-switch should only fire
+            // when mpv itself transitions from idle to playing, not when the
+            // user pauses or stops.
+            //
+            // By processing the pending action first we:
+            //   1. Send the real mpv command (Pause / Resume / Stop)
+            //   2. Sync `state.is_playing` to the desired value immediately
+            //   3. Prevent the auto-switch from misreading the transition
+            if let Some(action) = self.state.pending_transport_action.take() {
+                match action {
+                    crate::state::TransportAction::Play => {
+                        mpv.send(crate::mpv::MpvCommand::Resume);
+                        self.state.is_playing = true;
+                    }
+                    crate::state::TransportAction::Pause => {
+                        mpv.send(crate::mpv::MpvCommand::Pause);
+                        self.state.is_playing = false;
+                    }
+                    crate::state::TransportAction::Stop => {
+                        mpv.send(crate::mpv::MpvCommand::Stop);
+                        self.state.is_playing = false;
+                    }
+                    crate::state::TransportAction::Next
+                    | crate::state::TransportAction::Previous => {
+                        // Stop the current track; the initial-play detection
+                        // on the next frame will pick up the new track index
+                        // (already set by the transport click handler) and
+                        // send its URL to mpv.
+                        mpv.send(crate::mpv::MpvCommand::Stop);
+                        self.state.is_playing = false;
+                    }
+                }
+            }
+
             // Initial play detection: the UI set is_playing=true (e.g. from
             // album_detail Play button) but mpv hasn't started yet (no
             // current_time, not playing). Send the first track's URL to mpv.
@@ -560,34 +607,6 @@ impl eframe::App for NavidromeApp {
                 && self.state.current_track_index.is_some()
             {
                 self.state.push_view(View::NowPlaying);
-            }
-
-            // ── Pending transport actions ──────────────────────────────────────
-            //
-            // The transport bar click handler sets `pending_transport_action`
-            // when the user clicks play/pause/stop/next/previous. We consume it
-            // here, inside the mpv block where we have access to the mpv
-            // command channel. This is the only place mpv commands can be sent.
-            if let Some(action) = self.state.pending_transport_action.take() {
-                match action {
-                    crate::state::TransportAction::Play => {
-                        mpv.send(crate::mpv::MpvCommand::Resume);
-                    }
-                    crate::state::TransportAction::Pause => {
-                        mpv.send(crate::mpv::MpvCommand::Pause);
-                    }
-                    crate::state::TransportAction::Stop => {
-                        mpv.send(crate::mpv::MpvCommand::Stop);
-                    }
-                    crate::state::TransportAction::Next
-                    | crate::state::TransportAction::Previous => {
-                        // Stop the current track; the initial-play detection
-                        // on the next frame will pick up the new track index
-                        // (already set by the transport click handler) and
-                        // send its URL to mpv.
-                        mpv.send(crate::mpv::MpvCommand::Stop);
-                    }
-                }
             }
         }  // end if let Some(ref mpv)
     }
