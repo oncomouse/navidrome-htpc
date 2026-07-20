@@ -105,6 +105,16 @@ restart from the beginning.
     this). Don't do this unprompted — it's an architectural change.
 - **No virtualized rendering:** large lists (10k+ artists) render all items.
 - **No queue persistence:** queue is lost on app restart.
+- **Play/pause button flicker (2026-07-20, FIXED):** the transport icon was
+  drawn from `state.is_playing`, which the per-frame mpv poll
+  (`app.rs:438`) overwrites for 1-2 frames after a click while mpv's IPC
+  catches up — so the ▶/⏸ icon flickered. Fix: added an intent latch
+  (`state.intended_playing: Option<bool>` + `intent_frames_remaining: u16`).
+  The transport button renders from the latch when set; `app.rs`
+  reconciliation clears it once mpv's *raw poll* (`mpv_state`, NOT
+  `state.is_playing` which the pending-action block sets synchronously)
+  converges to the intent, or after a 30-frame (~0.5s) safety budget, or if
+  the track index clears. Constant `INTENT_LATCH_FRAMES` in transport.rs.
 - **Transport bar visibility (2026-07-20):** Prev/Play/Stop/Next +
   progress slider are hidden unless `state.current_track_index.is_some()`
   (gated in `src/ui/transport.rs` render). Volume stays always

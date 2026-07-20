@@ -119,6 +119,16 @@ pub struct AppState {
     /// (not every frame — that would fight manual queue scrolling).
     pub last_scrolled_track: Option<usize>,
     pub is_playing: bool,
+    /// Play/pause state the user last requested via the transport bar. While
+    /// `Some`, the transport button renders from this intended value instead
+    /// of the raw per-frame mpv poll, eliminating the 1-2 frame icon flicker
+    /// while mpv's IPC catches up to the command. Cleared once mpv's reported
+    /// state matches the intent, once a stopped/empty state settles against a
+    /// play-intent, or after `intent_frames_remaining` hits zero.
+    pub intended_playing: Option<bool>,
+    /// Frames left before the `intended_playing` latch is force-cleared, so a
+    /// command mpv never confirms (e.g. a dead stream) can't wedge the icon.
+    pub intent_frames_remaining: u16,
     pub current_time: f32,
     pub total_duration: f32,
     pub volume: f32,

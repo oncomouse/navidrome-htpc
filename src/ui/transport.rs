@@ -1,6 +1,12 @@
-use eframe::egui;
 use crate::state::{AppState, FocusZone, TransportAction};
 use crate::theme::*;
+use eframe::egui;
+
+/// How many frames the play/pause intent latch survives before being
+/// force-cleared if mpv never reports a matching state. At ~60fps this is a
+/// ~0.5s ceiling — long enough to cover mpv's IPC lag, short enough that a
+/// command mpv silently drops won't wedge the icon indefinitely.
+const INTENT_LATCH_FRAMES: u16 = 30;
 
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
     egui::TopBottomPanel::bottom("transport").show(ctx, |ui| {
@@ -18,7 +24,20 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
             if state.current_track_index.is_some() {
                 let buttons = [
                     ("\u{23EE}", 0), // Prev
-                    (if state.is_playing { "\u{23F8}" } else { "\u{25B6}" }, 1), // Play/Pause
+                    // Render the play/pause icon from the user's latched intent
+                    // (`intended_playing`) when present, falling back to the
+                    // mpv-derived `is_playing`. mpv's IPC lags a click by 1-2
+                    // frames, so reading `is_playing` directly makes the icon
+                    // flicker between ▶ and ⏸ right after a press; the latch
+                    // shows the definitive requested state until mpv catches up.
+                    (
+                        if state.intended_playing.unwrap_or(state.is_playing) {
+                            "\u{23F8}"
+                        } else {
+                            "\u{25B6}"
+                        },
+                        1,
+                    ), // Play/Pause
                     ("\u{23F9}", 2), // Stop
                     ("\u{23ED}", 3), // Next
                 ];
@@ -105,6 +124,12 @@ fn handle_transport_click(idx: usize, state: &mut AppState) {
                 state.is_playing = true;
                 state.pending_transport_action = Some(TransportAction::Play);
             }
+            // Latch the requested play/pause state so the button icon shows
+            // the definitive intent while mpv's IPC catches up (1-2 frames),
+            // instead of flickering off the raw poll. app.rs clears the latch
+            // once mpv's reported state converges or the frame budget expires.
+            state.intended_playing = Some(state.is_playing);
+            state.intent_frames_remaining = INTENT_LATCH_FRAMES;
         }
         2 => {
             // Stop
@@ -117,6 +142,10 @@ fn handle_transport_click(idx: usize, state: &mut AppState) {
             state.current_time = 0.0;
             state.total_duration = 0.0;
             state.pending_transport_action = Some(TransportAction::Stop);
+            // Stop clears current_track_index, so the transport buttons stop
+            // rendering entirely — drop any stale play/pause intent latch.
+            state.intended_playing = None;
+            state.intent_frames_remaining = 0;
         }
         3 => {
             // Next — advance to next track in queue

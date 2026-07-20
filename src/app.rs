@@ -544,6 +544,31 @@ impl eframe::App for NavidromeApp {
                 }
             }
 
+            // ── Play/pause intent latch reconciliation ─────────────────────────
+            //
+            // The transport bar latches `intended_playing` on a play/pause
+            // click so the button icon shows the requested state instead of
+            // flickering off the lagged mpv poll (see transport.rs). Clear the
+            // latch once mpv's *reported* state (the raw poll, NOT
+            // `self.state.is_playing` — the pending-action block above sets
+            // that synchronously to the intended value, so comparing against it
+            // would clear the latch one frame before the lagged poll actually
+            // causes the flicker) matches intent, or once the frame budget runs
+            // out (safety net for a command mpv never confirms — e.g. a dead
+            // stream — so the icon can't wedge).
+            if let Some(intended) = self.state.intended_playing {
+                let mpv_playing = mpv_state.is_playing && !mpv_state.is_paused;
+                self.state.intent_frames_remaining =
+                    self.state.intent_frames_remaining.saturating_sub(1);
+                if mpv_playing == intended
+                    || self.state.intent_frames_remaining == 0
+                    || self.state.current_track_index.is_none()
+                {
+                    self.state.intended_playing = None;
+                    self.state.intent_frames_remaining = 0;
+                }
+            }
+
             // Initial play detection: the UI set is_playing=true (e.g. from
             // album_detail Play button) but mpv hasn't started yet (no
             // current_time, not playing). Send the first track's URL to mpv.
