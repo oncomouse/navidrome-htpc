@@ -287,8 +287,12 @@ impl eframe::App for NavidromeApp {
                 View::NowPlaying => self.state.play_queue.len().max(1),
                 _ => 1,
             };
+            let has_header = matches!(
+                self.state.current_view(),
+                View::AlbumDetail | View::PlaylistDetail
+            );
             let mut focus = self.state.focus.clone();
-            handle_arrow(&mut focus, key, num_content_rows, 6);
+            handle_arrow(&mut focus, key, num_content_rows, 6, has_header);
             self.state.focus = focus;
         }
 
@@ -302,9 +306,15 @@ impl eframe::App for NavidromeApp {
         //
         // Pressing Enter on a focused content item triggers the same action as
         // clicking it (navigate to detail view, play from track, etc.).
-        if keys.1 && !self.context_menu.open && self.state.focus.zone == FocusZone::Content {
+        if keys.1
+            && !self.context_menu.open
+            && (self.state.focus.zone == FocusZone::Content
+                || self.state.focus.zone == FocusZone::Header)
+        {
+            let zone = self.state.focus.zone;
             let row = self.state.focus.content_row;
             let col = self.state.focus.content_col;
+            let header_idx = self.state.focus.header_index;
             match self.state.current_view() {
                 View::Home => match row {
                     // Section cards: Artists (0), Albums (1), Playlists (2)
@@ -328,18 +338,53 @@ impl eframe::App for NavidromeApp {
                     }
                     _ => {}
                 },
-                View::AlbumList => {
-                    if let Some(album) = self.state.albums.get(col) {
-                        self.state.current_album = Some(album.clone());
-                        self.state.push_view(View::AlbumDetail);
-                    }
-                }
                 View::AlbumDetail => {
-                    if row < self.state.current_album_tracks.len() {
+                    if zone == FocusZone::Header {
+                        match header_idx {
+                            0 => {
+                                // Play — replace queue with album tracks, start playing
+                                self.state.play_queue = self.state.current_album_tracks.clone();
+                                self.state.current_track_index = Some(0);
+                                self.state.is_playing = true;
+                                self.state.push_view(View::NowPlaying);
+                            }
+                            1 => {
+                                // Shuffle — shuffle album tracks, replace queue, play
+                                let mut tracks = self.state.current_album_tracks.clone();
+                                use rand::seq::SliceRandom;
+                                let mut rng = rand::rng();
+                                tracks.shuffle(&mut rng);
+                                self.state.play_queue = tracks;
+                                self.state.current_track_index = Some(0);
+                                self.state.is_playing = true;
+                                self.state.push_view(View::NowPlaying);
+                            }
+                            2 => {
+                                // Add to Queue — append album tracks
+                                self.state
+                                    .play_queue
+                                    .extend(self.state.current_album_tracks.clone());
+                                self.state.toasts.push(crate::state::Toast {
+                                    message: format!(
+                                        "Added {} tracks to queue",
+                                        self.state.current_album_tracks.len()
+                                    ),
+                                    ttl: 3.0,
+                                });
+                            }
+                            _ => {}
+                        }
+                    } else if row < self.state.current_album_tracks.len() {
                         self.state.play_queue = self.state.current_album_tracks.clone();
                         self.state.current_track_index = Some(row);
                         self.state.is_playing = true;
                         self.state.push_view(View::NowPlaying);
+                    }
+                }
+                View::AlbumList => {
+                    if let Some(album) = self.state.albums.get(col) {
+                        self.state.current_album = Some(album.clone());
+                        self.state.push_view(View::AlbumDetail);
                     }
                 }
                 View::ArtistList => {
@@ -352,6 +397,51 @@ impl eframe::App for NavidromeApp {
                     if let Some(playlist) = self.state.playlists.get(col) {
                         self.state.current_playlist = Some(playlist.clone());
                         self.state.push_view(View::PlaylistDetail);
+                    }
+                }
+                View::PlaylistDetail => {
+                    if zone == FocusZone::Header {
+                        match header_idx {
+                            0 => {
+                                // Play — replace queue with playlist tracks, play
+                                self.state.play_queue =
+                                    self.state.current_playlist_tracks.clone();
+                                self.state.current_track_index = Some(0);
+                                self.state.is_playing = true;
+                                self.state.push_view(View::NowPlaying);
+                            }
+                            1 => {
+                                // Shuffle — shuffle playlist tracks, replace queue, play
+                                let mut tracks = self.state.current_playlist_tracks.clone();
+                                use rand::seq::SliceRandom;
+                                let mut rng = rand::rng();
+                                tracks.shuffle(&mut rng);
+                                self.state.play_queue = tracks;
+                                self.state.current_track_index = Some(0);
+                                self.state.is_playing = true;
+                                self.state.push_view(View::NowPlaying);
+                            }
+                            2 => {
+                                // Add to Queue — append playlist tracks
+                                self.state
+                                    .play_queue
+                                    .extend(self.state.current_playlist_tracks.clone());
+                                self.state.toasts.push(crate::state::Toast {
+                                    message: format!(
+                                        "Added {} tracks to queue",
+                                        self.state.current_playlist_tracks.len()
+                                    ),
+                                    ttl: 3.0,
+                                });
+                            }
+                            _ => {}
+                        }
+                    } else if row < self.state.current_playlist_tracks.len() {
+                        self.state.play_queue =
+                            self.state.current_playlist_tracks[row..].to_vec();
+                        self.state.current_track_index = Some(0);
+                        self.state.is_playing = true;
+                        self.state.push_view(View::NowPlaying);
                     }
                 }
                 View::NowPlaying => {

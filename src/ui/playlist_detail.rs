@@ -17,13 +17,17 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             ui.label(egui::RichText::new(format!("{} songs", playlist.song_count)).color(TEXT_SECONDARY));
             ui.add_space(12.0);
             ui.horizontal(|ui| {
-                if ui.add_sized([100.0, 36.0], egui::Button::new("\u{25B6} Play")).clicked() {
+                let play_focused = state.focus.zone == FocusZone::Header
+                    && state.focus.header_index == 0;
+                if common::render_header_button(ui, "\u{25B6} Play", 100.0, play_focused) {
                     state.play_queue = state.current_playlist_tracks.clone();
                     state.current_track_index = Some(0);
                     state.is_playing = true;
                     state.push_view(View::NowPlaying);
                 }
-                if ui.add_sized([120.0, 36.0], egui::Button::new("\u{1f500} Shuffle")).clicked() {
+                let shuffle_focused = state.focus.zone == FocusZone::Header
+                    && state.focus.header_index == 1;
+                if common::render_header_button(ui, "\u{1f500} Shuffle", 120.0, shuffle_focused) {
                     let mut tracks = state.current_playlist_tracks.clone();
                     use rand::seq::SliceRandom;
                     let mut rng = rand::rng();
@@ -33,7 +37,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     state.is_playing = true;
                     state.push_view(View::NowPlaying);
                 }
-                if ui.add_sized([140.0, 36.0], egui::Button::new("+ Add to Queue")).clicked() {
+                let add_focused = state.focus.zone == FocusZone::Header
+                    && state.focus.header_index == 2;
+                if common::render_header_button(ui, "+ Add to Queue", 140.0, add_focused) {
                     state.play_queue.extend(state.current_playlist_tracks.clone());
                     state.toasts.push(crate::state::Toast {
                         message: format!("Added {} tracks to queue", state.current_playlist_tracks.len()),

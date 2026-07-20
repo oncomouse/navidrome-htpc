@@ -35,19 +35,31 @@ pub fn handle_arrow(
     key: Key,
     num_content_rows: usize,
     num_transport_controls: usize,
+    has_header: bool,
 ) -> FocusAction {
     match focus.zone {
-        FocusZone::Content => handle_content_arrow(focus, key, num_content_rows),
+        FocusZone::Content => handle_content_arrow(focus, key, num_content_rows, has_header),
         FocusZone::Menu => handle_menu_arrow(focus, key),
         FocusZone::Transport => handle_transport_arrow(focus, key, num_transport_controls),
+        FocusZone::Header => handle_header_arrow(focus, key),
     }
 }
 
-fn handle_content_arrow(focus: &mut FocusState, key: Key, num_rows: usize) -> FocusAction {
+fn handle_content_arrow(
+    focus: &mut FocusState,
+    key: Key,
+    num_rows: usize,
+    has_header: bool,
+) -> FocusAction {
     match key {
         Key::ArrowUp => {
             if focus.content_row > 0 {
                 focus.content_row -= 1;
+            } else if has_header {
+                // At the top of the track list on a detail view: move focus
+                // up into the header action buttons (Play / Shuffle / Add).
+                focus.zone = FocusZone::Header;
+                focus.header_index = 0;
             }
             FocusAction::None
         }
@@ -121,6 +133,32 @@ fn handle_transport_arrow(focus: &mut FocusState, key: Key, num_controls: usize)
         Key::ArrowRight => {
             if focus.transport_index + 1 < num_controls {
                 focus.transport_index += 1;
+            }
+            FocusAction::None
+        }
+        _ => FocusAction::None,
+    }
+}
+
+/// Arrow navigation within a detail-view header (the Play / Shuffle / Add to
+/// Queue action buttons). Left/Right move between the three buttons; Up or
+/// Down drops focus back into the track list (row 0).
+fn handle_header_arrow(focus: &mut FocusState, key: Key) -> FocusAction {
+    match key {
+        Key::ArrowDown | Key::ArrowUp => {
+            focus.zone = FocusZone::Content;
+            focus.content_row = 0;
+            FocusAction::None
+        }
+        Key::ArrowLeft => {
+            if focus.header_index > 0 {
+                focus.header_index -= 1;
+            }
+            FocusAction::None
+        }
+        Key::ArrowRight => {
+            if focus.header_index + 1 < 3 {
+                focus.header_index += 1;
             }
             FocusAction::None
         }

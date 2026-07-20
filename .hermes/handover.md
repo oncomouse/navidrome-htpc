@@ -120,6 +120,18 @@ restart from the beginning.
   (gated in `src/ui/transport.rs` render). Volume stays always
   visible. When empty, `FocusZone::Transport` bounces to Content
   so keyboard focus isn't trapped. (Todo item #2 done.)
+- **Detail-view header buttons keyboard-accessible (2026-07-20, FIXED):**
+  the Play / Shuffle / Add to Queue buttons at the top of album/playlist
+  detail pages were plain egui `Button`s fired only by mouse `.clicked()`,
+  outside the custom focus system — so they had no keyboard path or
+  highlight. Fix: added a `FocusZone::Header` zone (with `header_index`
+  0=Play,1=Shuffle,2=Add), a shared `render_header_button` helper in
+  common.rs (painter-based, highlights via the focus zone), and a
+  `handle_header_arrow` nav (Left/Right between buttons, Up/Down back to the
+  track list). On detail views, ArrowUp from track row 0 enters the header;
+  Enter in the header runs the same action as a click (dispatched centrally
+  in app.rs, mirroring the per-view track activation). Supports both mouse
+  and keyboard (per user convention "Click = mouse OR Enter").
 - **Wizard backends:** `self.subsonic` / `self.mpv` are `Some` after
   post-wizard init, but `SubsonicClient::start` with wrong credentials returns a
   broken handle silently (client=None, worker thread not spawned). No retry

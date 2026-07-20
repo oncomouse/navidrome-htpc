@@ -39,6 +39,10 @@ pub enum FocusZone {
     Content,
     Menu,
     Transport,
+    /// The action buttons at the top of a detail view (album/playlist):
+    /// Play (0), Shuffle (1), Add to Queue (2). These are painted manually
+    /// and have no egui-native focus, so they get their own zone.
+    Header,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -65,6 +69,7 @@ pub struct FocusState {
     pub menu_expanded: bool,
     pub menu_index: usize,        // 0=Search, 1=Settings, 2=NowPlaying
     pub transport_index: usize,   // 0=Prev, 1=Play, 2=Stop, 3=Next, 4=Progress, 5=Volume
+    pub header_index: usize,      // 0=Play, 1=Shuffle, 2=Add to Queue (detail view header)
 }
 
 impl Default for FocusState {
@@ -76,6 +81,7 @@ impl Default for FocusState {
             menu_expanded: false,
             menu_index: 0,
             transport_index: 1, // start on Play/Pause
+            header_index: 0,    // start on Play
         }
     }
 }

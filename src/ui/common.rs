@@ -99,6 +99,42 @@ pub fn render_album_thumbnail(
     resp.clicked_by(egui::PointerButton::Primary)
 }
 
+/// Render a detail-view header action button (Play / Shuffle / Add to Queue).
+///
+/// These buttons live outside egui's native widget focus (which `app.rs`
+/// surrenders every frame), so we paint them manually and drive the keyboard
+/// highlight from the custom focus system's `Header` zone. Returns the
+/// mouse-clicked bool; keyboard activation is handled centrally in `app.rs`.
+pub fn render_header_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    width: f32,
+    focused: bool,
+) -> bool {
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::click());
+    let bg = if focused {
+        BG_FOCUS
+    } else if resp.hovered() {
+        BG_HOVER
+    } else {
+        BG_WIDGET
+    };
+    ui.painter().rect_filled(rect, 8.0, bg);
+    if focused {
+        ui.painter()
+            .rect_stroke(rect, 8.0, egui::Stroke::new(2.0, ACCENT));
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::TextStyle::Button.resolve(ui.style()),
+        TEXT_PRIMARY,
+    );
+    resp.clicked_by(egui::PointerButton::Primary)
+}
+
 /// Render a track row in a list — painter-based
 pub fn render_track_row(
     ui: &mut egui::Ui,
