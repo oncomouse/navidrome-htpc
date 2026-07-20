@@ -63,9 +63,22 @@ restart from the beginning.
 - **No auto-scroll gate:** the NowPlaying queue scrolls every frame to center the
   current track (pitfall #14). Add `last_scrolled_track: Option<usize>` to
   AppState and only scroll when the index changes.
-- **Cover art cache not wired:** `CoverArtCache` exists but views still use
-  `state.cover_textures` directly via the collector pattern. The async fetch path
-  is not implemented.
+- **Cover art cache IS wired (verified 2026-07-20):** `CoverArtCache` is
+  fully integrated — `NavidromeApp.cover_art_cache` field constructed in
+  `new()`, `fetch_cover_arts_for_current_view()` runs every frame from
+  `update()` (app.rs ~line 231), collects visible `(album_id, cover_id)`
+  pairs via `collect_visible_cover_ids()` (Home/AlbumList/AlbumDetail/
+  ArtistDetail/NowPlaying), fetches misses through `build_cover_art_url` →
+  `CoverArtCache::fetch_blocking` (disk+memory+HTTP), then syncs into
+  `state.cover_textures` keyed by `album_id`. All five album views read
+  `state.cover_textures.get(&album.id)` and render via `render_album_thumbnail`.
+  `cargo check` is clean. The old "not wired" note was stale.
+  - **KNOWN DEBT (not a bug):** the fetch is BLOCKING on the UI thread
+    (`reqwest::blocking` inside `fetch_blocking`, called from `update()`). On a
+    cold cache each uncached cover serially blocks the 60fps render until its
+    HTTP download finishes. A future iteration should move cover fetches onto
+    the async Subsonic client thread (the `cover_art.rs` doc already notes
+    this). Don't do this unprompted — it's an architectural change.
 - **No virtualized rendering:** large lists (10k+ artists) render all items.
 - **No queue persistence:** queue is lost on app restart.
 - **Wizard backends:** `self.subsonic` / `self.mpv` are `Some` after
