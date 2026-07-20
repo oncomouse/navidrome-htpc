@@ -5,7 +5,7 @@ use crate::theme::*;
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
     egui::TopBottomPanel::bottom("transport").show(ctx, |ui| {
         ui.add_space(8.0);
-        ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Transport buttons (painter-based)
             let buttons = [
                 ("\u{23EE}", 0), // Prev
