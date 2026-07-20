@@ -75,15 +75,25 @@ pub fn render_album_thumbnail(
         );
     }
 
-    // Album name (bottom 40px)
-    let text_rect =
-        egui::Rect::from_min_size(egui::pos2(rect.min.x, rect.min.y + 164.0), egui::vec2(160.0, 36.0));
+    // Album name (bottom 40px, artist name below)
+    let name_rect =
+        egui::Rect::from_min_size(egui::pos2(rect.min.x, rect.min.y + 164.0), egui::vec2(160.0, 18.0));
     ui.painter().text(
-        text_rect.min,
+        name_rect.min,
         egui::Align2::LEFT_TOP,
         &album.name,
         egui::TextStyle::Small.resolve(ui.style()),
         TEXT_PRIMARY,
+    );
+    // Artist name below album title
+    let artist_rect =
+        egui::Rect::from_min_size(egui::pos2(rect.min.x, rect.min.y + 182.0), egui::vec2(160.0, 16.0));
+    ui.painter().text(
+        artist_rect.min,
+        egui::Align2::LEFT_TOP,
+        &album.artist_name,
+        egui::TextStyle::Body.resolve(ui.style()),
+        TEXT_SECONDARY,
     );
 
     resp.clicked_by(egui::PointerButton::Primary)

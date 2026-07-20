@@ -50,6 +50,13 @@ impl CoverArtCache {
         self.memory.get(id)
     }
 
+    /// Return a reference to all in-memory textures. Used by the UI loop
+    /// to sync cached textures into `AppState::cover_textures` before
+    /// rendering.
+    pub fn all_textures(&self) -> &HashMap<String, egui::TextureHandle> {
+        &self.memory
+    }
+
     /// Insert a pre-built texture (e.g. constructed from bytes already
     /// in hand) into the memory cache. Used by tests and by future async
     /// fetch paths that don't go through `fetch_blocking`.

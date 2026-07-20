@@ -28,6 +28,10 @@ pub struct NavidromeApp {
     /// an album card whose tracks aren't loaded yet; consumed in the
     /// `SubsonicCommand::poll` path once `album_detail` arrives.
     pending_menu_album: Option<(String, ContextMenuAction)>,
+    /// Disk + memory cover-art cache. Fetches synchronously (blocking HTTP
+    /// on cold cache, disk hit on warm cache). Populated lazily as albums
+    /// are displayed.
+    cover_art_cache: crate::subsonic::cover_art::CoverArtCache,
 }
 
 impl NavidromeApp {
@@ -36,6 +40,9 @@ impl NavidromeApp {
         subsonic: Option<SubsonicClient>,
         mpv: Option<MpvController>,
     ) -> Self {
+        // Initialize the cover-art cache using the configured cache directory.
+        let cache_dir = std::path::PathBuf::from(&state.config.cache.dir)
+            .join("covers");
         Self {
             state,
             subsonic,
@@ -194,20 +201,32 @@ impl eframe::App for NavidromeApp {
                 self.state.search_results_tracks = sr.tracks;
             }
             if let Some(ref err) = results.error {
-                self.state.toasts.push(crate::state::Toast { message: err.clone(), ttl: 3.0 });
+                self.state.toasts.push(crate::state::Toast {
+                    message: err.clone(),
+                    ttl: 3.0,
+                });
             }
         }
 
+        // ── Cover-art fetch ────────────────────────────────────────────────────
+        // Collect all album cover IDs visible in the current view, then fetch
+        // any that aren't cached yet. On the first render after fetching, the
+        // texture will be available. This runs every frame but `fetch_blocking`
+        // short-circuits on cache hits (in-memory check).
+        self.fetch_cover_arts_for_current_view(ctx);
+
         // ── Keyboard dispatch ─────────────────────────────────────────────────
-        let keys = ctx.input(|i| (
-            i.key_pressed(egui::Key::Escape),
-            i.key_pressed(egui::Key::Enter),
-            i.key_pressed(egui::Key::Space),
-            i.key_pressed(egui::Key::ArrowUp),
-            i.key_pressed(egui::Key::ArrowDown),
-            i.key_pressed(egui::Key::ArrowLeft),
-            i.key_pressed(egui::Key::ArrowRight),
-        ));
+        let keys = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::Escape),
+                i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Space),
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::ArrowLeft),
+                i.key_pressed(egui::Key::ArrowRight),
+            )
+        });
 
         if keys.0 {
             // Clone focus to a local so we can pass both `&mut focus` and `&self.state`
@@ -358,9 +377,19 @@ impl eframe::App for NavidromeApp {
             // Track-end transition: mpv reports is_playing=false but we were
             // playing on the previous frame. Advance the queue (when auto-
             // advance is enabled) and tell mpv to load the next URL.
+            //
+            // GUARD: we require `total_duration > 0.0` to avoid a false
+            // positive on the very first frame after a Play click. On that
+            // frame `was_playing` is true (set by the click handler) and
+            // `mpv_state.is_playing` is false (mpv hasn't started loading
+            // yet), but mpv hasn't actually played anything — `total_duration`
+            // is still 0.0 (mpv only sets duration when it loads a file).
+            // Without this guard the track-end fires immediately after a
+            // Play click, advancing past track 0 and skipping it entirely.
             if !mpv_state.is_playing
                 && was_playing
                 && !mpv_state.crashed
+                && self.state.total_duration > 0.0
                 && self.state.config.playback.auto_advance
             {
                 match self.state.current_track_index {
@@ -686,5 +715,116 @@ impl NavidromeApp {
         self.state.current_time = 0.0;
         self.state.total_duration = 0.0;
         self.state.push_view(View::NowPlaying);
+    }
+}
+
+// ── Cover-art fetch helpers ─────────────────────────────────────────────────
+//
+// These live on a separate `impl` block so they don't clutter the main update
+// method. The primary driver is `fetch_cover_arts_for_current_view` which
+// collects album cover IDs visible in the current view and triggers blocking
+// fetches for any not yet cached.
+
+impl NavidromeApp {
+    /// Collect all album cover IDs from the current view's visible albums and
+    /// fetch any that aren't in the cache yet. Also syncs cached textures into
+    /// `state.cover_textures` so the render functions can find them via
+    /// `state.cover_textures.get(&album_id)` (or `&track.cover_art_id`).
+    fn fetch_cover_arts_for_current_view(&mut self, ctx: &egui::Context) {
+        let cover_ids = self.collect_visible_cover_ids();
+
+        let subsonic = match self.subsonic {
+            Some(ref s) => s,
+            None => return,
+        };
+        let client = match subsonic.client {
+            Some(ref c) => c,
+            None => return,
+        };
+        let size = self.state.config.cache.cover_art_size;
+
+        for cover_id in &cover_ids {
+            if self.cover_art_cache.get(cover_id).is_none() {
+                // Build the cover-art URL and fetch synchronously.
+                // `fetch_blocking` short-circuits if already in memory
+                // (checked above), reads from disk on cache hit, and
+                // HTTP GETs on cache miss.
+                match crate::subsonic::build_cover_art_url(client, cover_id, size) {
+                    Ok(url) => {
+                        if let Err(e) = self
+                            .cover_art_cache
+                            .fetch_blocking(ctx, cover_id, &url, size)
+                        {
+                            tracing::warn!("Cover art fetch failed for {cover_id}: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not build cover art URL for {cover_id}: {e}");
+                    }
+                }
+            }
+        }
+
+        // Sync all cached textures into state.cover_textures for rendering.
+        for (id, tex) in self.cover_art_cache.all_textures() {
+            self.state
+                .cover_textures
+                .entry(id.clone())
+                .or_insert_with(|| tex.clone());
+        }
+    }
+
+    /// Collect cover-art IDs for all albums visible in the current view.
+    /// Returns `Vec<String>` (the `cover_art_id` from each album's model).
+    fn collect_visible_cover_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        match self.state.current_view() {
+            View::Home => {
+                for album in &self.state.recent_albums {
+                    if let Some(ref cid) = album.cover_art_id {
+                        ids.push(cid.clone());
+                    }
+                }
+                for album in &self.state.recent_played {
+                    if let Some(ref cid) = album.cover_art_id {
+                        ids.push(cid.clone());
+                    }
+                }
+            }
+            View::AlbumList => {
+                for album in &self.state.albums {
+                    if let Some(ref cid) = album.cover_art_id {
+                        ids.push(cid.clone());
+                    }
+                }
+            }
+            View::AlbumDetail => {
+                if let Some(ref album) = self.state.current_album {
+                    if let Some(ref cid) = album.cover_art_id {
+                        ids.push(cid.clone());
+                    }
+                }
+            }
+            View::ArtistDetail => {
+                for album in &self.state.current_artist_albums {
+                    if let Some(ref cid) = album.cover_art_id {
+                        ids.push(cid.clone());
+                    }
+                }
+            }
+            View::NowPlaying => {
+                if let Some(idx) = self.state.current_track_index {
+                    if let Some(track) = self.state.play_queue.get(idx) {
+                        if let Some(ref cid) = track.cover_art_id {
+                            ids.push(cid.clone());
+                        }
+                    }
+                }
+            }
+            // ArtistList, PlaylistList, PlaylistDetail, Search, Settings
+            // don't display cover art.
+            _ => {}
+        }
+        ids
     }
 }
