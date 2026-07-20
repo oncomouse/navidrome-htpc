@@ -110,6 +110,10 @@ pub struct AppState {
     // Playback state (updated by mpv thread)
     pub play_queue: Vec<Track>,
     pub current_track_index: Option<usize>,
+    /// Index of the last track that was actually playing, retained across a
+    /// Stop so the Play button can resume/restart it. `None` only before the
+    /// first track has ever played.
+    pub last_played_track_index: Option<usize>,
     pub is_playing: bool,
     pub current_time: f32,
     pub total_duration: f32,

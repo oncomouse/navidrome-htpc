@@ -471,8 +471,58 @@ impl eframe::App for NavidromeApp {
             if let Some(action) = self.state.pending_transport_action.take() {
                 match action {
                     crate::state::TransportAction::Play => {
-                        mpv.send(crate::mpv::MpvCommand::Resume);
-                        self.state.is_playing = true;
+                        // If we have a current track we're merely paused and
+                        // should just un-pause mpv. If Stop cleared the index
+                        // we need to rebuild and (re)load the file — a bare
+                        // Resume does nothing because mpv unloaded it.
+                        if self.state.current_track_index.is_some() {
+                            mpv.send(crate::mpv::MpvCommand::Resume);
+                            self.state.is_playing = true;
+                        } else {
+                            // Restore the track index from the last played
+                            // position (set by the Stop handler), defaulting
+                            // to the start of the queue if nothing was played
+                            // yet but the queue is populated.
+                            let restore = self
+                                .state
+                                .last_played_track_index
+                                .or_else(|| {
+                                    if self.state.play_queue.is_empty() {
+                                        None
+                                    } else {
+                                        Some(0)
+                                    }
+                                });
+                            match restore {
+                                Some(idx) if idx < self.state.play_queue.len() => {
+                                    self.state.current_track_index = Some(idx);
+                                    if let Some(ref subsonic) = self.subsonic {
+                                        let track = self.state.play_queue[idx].clone();
+                                        let max_bitrate = self.state.config.audio.max_bitrate;
+                                        match subsonic.stream_url(&track.id, max_bitrate) {
+                                            Some(url) => {
+                                                mpv.send(crate::mpv::MpvCommand::Play { url });
+                                                self.state.is_playing = true;
+                                            }
+                                            None => {
+                                                self.state.toasts.push(crate::state::Toast {
+                                                    message: "Could not build stream URL".to_string(),
+                                                    ttl: 3.0,
+                                                });
+                                                self.state.is_playing = false;
+                                            }
+                                        }
+                                    } else {
+                                        self.state.is_playing = false;
+                                    }
+                                }
+                                _ => {
+                                    // Queue empty / index out of range: nothing
+                                    // to play. Leave UI in the stopped state.
+                                    self.state.is_playing = false;
+                                }
+                            }
+                        }
                     }
                     crate::state::TransportAction::Pause => {
                         mpv.send(crate::mpv::MpvCommand::Pause);

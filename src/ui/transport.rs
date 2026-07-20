@@ -96,6 +96,10 @@ fn handle_transport_click(idx: usize, state: &mut AppState) {
         }
         2 => {
             // Stop
+            // Remember which track we were on so Play can restart it after
+            // Stop (mpv unloads the file on stop, so a plain Resume won't
+            // produce audio).
+            state.last_played_track_index = state.current_track_index;
             state.is_playing = false;
             state.current_track_index = None;
             state.current_time = 0.0;

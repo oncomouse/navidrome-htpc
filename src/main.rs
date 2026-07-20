@@ -59,6 +59,7 @@ fn main() -> eframe::Result<()> {
         search_results_tracks: Vec::new(),
         play_queue: Vec::new(),
         current_track_index: None,
+        last_played_track_index: None,
         is_playing: false,
         current_time: 0.0,
         total_duration: 0.0,
