@@ -259,19 +259,41 @@ impl eframe::App for NavidromeApp {
                 }
             }
         }
-        // (Full keyboard dispatch expanded in later tasks)
+        // ── Arrow-key focus navigation ──────────────────────────────────────────
+        //
+        // Dispatch arrow keys to `handle_arrow` for focus movement. We skip
+        // dispatch when the context-menu flyout is open (it handles its own
+        // keyboard input). ArrowRight in the Content zone opens the context
+        // menu (below); for other zones it navigates normally.
+        let arrow_key = if keys.3 {
+            Some(egui::Key::ArrowUp)
+        } else if keys.4 {
+            Some(egui::Key::ArrowDown)
+        } else if keys.5 {
+            Some(egui::Key::ArrowLeft)
+        } else if keys.6 && self.state.focus.zone != FocusZone::Content {
+            Some(egui::Key::ArrowRight)
+        } else {
+            None
+        };
+
+        if let Some(key) = arrow_key {
+            // Compute the number of selectable rows in the current view so
+            // ArrowDown on the last row jumps to the transport controls.
+            let num_content_rows = match self.state.current_view() {
+                View::Home => 3,            // section cards, Recently Added, Recently Played
+                View::AlbumDetail => self.state.current_album_tracks.len().max(1),
+                View::PlaylistDetail => self.state.current_playlist_tracks.len().max(1),
+                View::NowPlaying => self.state.play_queue.len().max(1),
+                _ => 1,
+            };
+            let mut focus = self.state.focus.clone();
+            handle_arrow(&mut focus, key, num_content_rows, 6);
+            self.state.focus = focus;
+        }
 
         // ── Context menu: open on Right arrow when focused on a card/track ────
-        //
-        // When the user presses ArrowRight while focus is in the Content zone
-        // of a list/grid view, we pop the context-menu flyout anchored on the
-        // currently focused item. Detail views' header buttons (Play /
-        // Shuffle / Add to Queue) are intentionally *not* handled here — only
-        // cards and track rows open the flyout.
-        //
-        // The flyout itself consumes Up/Down/Enter/Escape/Left via
-        // `render_context_menu` below, so we only open it here; once open,
-        // normal focus-arrow dispatch is effectively paused for those keys.
+        // (only when the flyout isn't already open — it handles its own keys)
         if keys.6 && self.state.focus.zone == FocusZone::Content && !self.context_menu.open {
             self.maybe_open_context_menu_for_focus();
         }
@@ -383,6 +405,11 @@ impl eframe::App for NavidromeApp {
                             match subsonic.stream_url(&track.id, max_bitrate) {
                                 Some(url) => {
                                     mpv.send(crate::mpv::MpvCommand::Play { url });
+                                    // Restore is_playing so the transport icon
+                                    // shows ⏸ immediately instead of ▶ until
+                                    // mpv's start-file event arrives on the
+                                    // next frame.
+                                    self.state.is_playing = true;
                                 }
                                 None => {
                                     self.state.toasts.push(crate::state::Toast {
@@ -752,9 +779,9 @@ impl NavidromeApp {
     /// Collect all album cover IDs from the current view's visible albums and
     /// fetch any that aren't in the cache yet. Also syncs cached textures into
     /// `state.cover_textures` so the render functions can find them via
-    /// `state.cover_textures.get(&album_id)` (or `&track.cover_art_id`).
+    /// `state.cover_textures.get(&album_id)` (or `&track.album_id`).
     fn fetch_cover_arts_for_current_view(&mut self, ctx: &egui::Context) {
-        let cover_ids = self.collect_visible_cover_ids();
+        let pairs = self.collect_visible_cover_ids();
 
         let subsonic = match self.subsonic {
             Some(ref s) => s,
@@ -766,12 +793,15 @@ impl NavidromeApp {
         };
         let size = self.state.config.cache.cover_art_size;
 
-        for cover_id in &cover_ids {
+        for (album_id, cover_id_opt) in &pairs {
+            let cover_id = match cover_id_opt {
+                Some(cid) => cid,
+                None => continue,
+            };
+            // Fetch by cover_art_id (the URL key), key the cache by
+            // cover_art_id for deduplication (multiple albums may share
+            // the same cover art).
             if self.cover_art_cache.get(cover_id).is_none() {
-                // Build the cover-art URL and fetch synchronously.
-                // `fetch_blocking` short-circuits if already in memory
-                // (checked above), reads from disk on cache hit, and
-                // HTTP GETs on cache miss.
                 match crate::subsonic::build_cover_art_url(client, cover_id, size) {
                     Ok(url) => {
                         if let Err(e) = self
@@ -788,59 +818,57 @@ impl NavidromeApp {
             }
         }
 
-        // Sync all cached textures into state.cover_textures for rendering.
-        for (id, tex) in self.cover_art_cache.all_textures() {
-            self.state
-                .cover_textures
-                .entry(id.clone())
-                .or_insert_with(|| tex.clone());
+        // Sync cached textures into state.cover_textures keyed by album_id
+        // (matching what home.rs, album_detail.rs, and now_playing.rs use
+        // for their lookups). Multiple albums sharing the same cover_id
+        // produce multiple cover_textures entries, each pointing to the
+        // same TextureHandle (cheap Arc clone).
+        for (album_id, cover_id_opt) in &pairs {
+            if let Some(cover_id) = cover_id_opt {
+                if let Some(tex) = self.cover_art_cache.get(cover_id) {
+                    self.state
+                        .cover_textures
+                        .entry(album_id.clone())
+                        .or_insert_with(|| tex.clone());
+                }
+            }
         }
     }
 
-    /// Collect cover-art IDs for all albums visible in the current view.
-    /// Returns `Vec<String>` (the `cover_art_id` from each album's model).
-    fn collect_visible_cover_ids(&self) -> Vec<String> {
-        let mut ids = Vec::new();
+    /// Collect `(album_id, cover_art_id)` pairs for albums visible in the
+    /// current view. The `album_id` is what views use as a lookup key in
+    /// `cover_textures`; `cover_art_id` is passed to the Subsonic URL
+    /// builder. Returns `None` when the album/track has no cover art.
+    fn collect_visible_cover_ids(&self) -> Vec<(String, Option<String>)> {
+        let mut pairs = Vec::new();
         match self.state.current_view() {
             View::Home => {
                 for album in &self.state.recent_albums {
-                    if let Some(ref cid) = album.cover_art_id {
-                        ids.push(cid.clone());
-                    }
+                    pairs.push((album.id.clone(), album.cover_art_id.clone()));
                 }
                 for album in &self.state.recent_played {
-                    if let Some(ref cid) = album.cover_art_id {
-                        ids.push(cid.clone());
-                    }
+                    pairs.push((album.id.clone(), album.cover_art_id.clone()));
                 }
             }
             View::AlbumList => {
                 for album in &self.state.albums {
-                    if let Some(ref cid) = album.cover_art_id {
-                        ids.push(cid.clone());
-                    }
+                    pairs.push((album.id.clone(), album.cover_art_id.clone()));
                 }
             }
             View::AlbumDetail => {
                 if let Some(ref album) = self.state.current_album {
-                    if let Some(ref cid) = album.cover_art_id {
-                        ids.push(cid.clone());
-                    }
+                    pairs.push((album.id.clone(), album.cover_art_id.clone()));
                 }
             }
             View::ArtistDetail => {
                 for album in &self.state.current_artist_albums {
-                    if let Some(ref cid) = album.cover_art_id {
-                        ids.push(cid.clone());
-                    }
+                    pairs.push((album.id.clone(), album.cover_art_id.clone()));
                 }
             }
             View::NowPlaying => {
                 if let Some(idx) = self.state.current_track_index {
                     if let Some(track) = self.state.play_queue.get(idx) {
-                        if let Some(ref cid) = track.cover_art_id {
-                            ids.push(cid.clone());
-                        }
+                        pairs.push((track.album_id.clone(), track.cover_art_id.clone()));
                     }
                 }
             }
@@ -848,6 +876,6 @@ impl NavidromeApp {
             // don't display cover art.
             _ => {}
         }
-        ids
+        pairs
     }
 }
