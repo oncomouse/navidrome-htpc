@@ -114,6 +114,10 @@ pub struct AppState {
     /// Stop so the Play button can resume/restart it. `None` only before the
     /// first track has ever played.
     pub last_played_track_index: Option<usize>,
+    /// Index of the track we last auto-scrolled the NowPlaying queue to,
+    /// so we only re-scroll when the current track actually changes
+    /// (not every frame — that would fight manual queue scrolling).
+    pub last_scrolled_track: Option<usize>,
     pub is_playing: bool,
     pub current_time: f32,
     pub total_duration: f32,

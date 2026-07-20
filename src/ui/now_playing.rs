@@ -114,8 +114,13 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             }
         });
 
-    // Auto-scroll to keep current track centered
-    if let Some(rect) = scroll_to {
-        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    // Auto-scroll to keep the current track centered — but ONLY when the
+    // current track index actually changes. Calling `scroll_to_rect` every
+    // frame would fight the user's manual scrolling of the queue.
+    if state.last_scrolled_track != Some(current_idx) {
+        if let Some(rect) = scroll_to {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            state.last_scrolled_track = Some(current_idx);
+        }
     }
 }

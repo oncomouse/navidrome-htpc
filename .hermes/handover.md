@@ -72,6 +72,11 @@ restart from the beginning.
 - **No auto-scroll gate:** the NowPlaying queue scrolls every frame to center the
   current track (pitfall #14). Add `last_scrolled_track: Option<usize>` to
   AppState and only scroll when the index changes.
+  - **FIXED (2026-07-20, commit pending):** added `AppState::last_scrolled_track`
+    and gated the `scroll_to_rect` call in `now_playing.rs` on
+    `state.last_scrolled_track != Some(current_idx)`, updating it on scroll.
+    The queue now only auto-centers when the current track changes, so manual
+    queue scrolling is no longer fought every frame.
 - **Cover art cache IS wired (verified 2026-07-20):** `CoverArtCache` is
   fully integrated — `NavidromeApp.cover_art_cache` field constructed in
   `new()`, `fetch_cover_arts_for_current_view()` runs every frame from
