@@ -651,8 +651,23 @@ impl eframe::App for NavidromeApp {
             // themselves on Play/Shuffle clicks; this catches the mpv-driven
             // path (e.g. queue advancement while the user is browsing another
             // view) so the UI follows the music.
+            //
+            // GUARD: we also require `!mpv_state.is_paused`. The mpv
+            // `pause` command leaves `is_playing = true` until an `end-file`
+            // event (only `start-file`/`end-file` touch `is_playing`); the
+            // `pause` property-change only flips `is_paused`. So for 1-2
+            // frames after a Pause click, mpv still reports
+            // `is_playing = true` while `is_paused` is becoming true. The
+            // previous-frame guard (`!was_playing`, set false by the pending
+            // Pause action) combined with this frame's still-true
+            // `is_playing` would otherwise read as "playback just started"
+            // and spuriously push NowPlaying while the user is browsing.
+            // Requiring `!is_paused` limits the auto-switch to genuine,
+            // non-paused playback starts (initial play, queue advance),
+            // which never have `is_paused = true`.
             if self.state.is_playing
                 && !was_playing
+                && !mpv_state.is_paused
                 && self.state.current_view() != View::NowPlaying
                 && self.state.current_track_index.is_some()
             {

@@ -63,12 +63,22 @@ restart from the beginning.
 ## Other known minor issues
 
 - **Auto-switch on pause:** when user is deep in browsing (not on NowPlaying) and
-  clicks Pause, the auto-switch pushes NowPlaying. Fixed in 71b05fe64 but the
-  auto-switch still fires when mpv transitions from idle to playing — this is
-  correct for queue advancement, but the Pause click also triggers a brief
-  mpv-playing→idle transition that shouldn't auto-switch. The pending-action
-  processing now sets `is_playing = false` before auto-switch runs, preventing
-  this. Keep an eye on it.
+  clicks Pause, the auto-switch pushes NowPlaying.
+  - **ROOT CAUSE (traced 2026-07-20):** mpv's `pause` command
+    leaves `MpvState.is_playing = true` (only `start-file`/`end-file`
+    touch `is_playing`; the `pause` property-change only flips
+    `is_paused`). So for 1-2 frames after a Pause click, mpv still
+    reports `is_playing=true` while `is_paused` is becoming true. The
+    pending-action block sets `is_playing=false` on the click frame, but
+    on the NEXT frame `was_playing` (prev end-state) is false while the
+    poll's `is_playing` is still true → the auto-switch condition
+    `is_playing && !was_playing` reads as "playback just started" and
+    spuriously pushes NowPlaying.
+  - **FIXED (2026-07-20, commit pending):** added `&&
+    !mpv_state.is_paused` to the auto-switch guard in `app.rs`. Every
+    legitimate auto-switch (initial play, queue advance) has
+    `is_paused=false`; the pause-lag window has `is_paused=true`, so the
+    spurious switch is suppressed without affecting real switches.
 - **No auto-scroll gate:** the NowPlaying queue scrolls every frame to center the
   current track (pitfall #14). Add `last_scrolled_track: Option<usize>` to
   AppState and only scroll when the index changes.
