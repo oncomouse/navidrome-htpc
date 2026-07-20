@@ -23,7 +23,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     state.is_playing = true;
                     state.push_view(View::NowPlaying);
                 }
-                if ui.add_sized([120.0, 36.0], egui::Button::new("\u{25B6}\u{25B6} Shuffle")).clicked() {
+                if ui.add_sized([120.0, 36.0], egui::Button::new("\u{1f500} Shuffle")).clicked() {
                     let mut tracks = state.current_playlist_tracks.clone();
                     use rand::seq::SliceRandom;
                     let mut rng = rand::rng();

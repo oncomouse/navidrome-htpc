@@ -21,7 +21,11 @@ pub fn handle_key(focus: &mut FocusState, key: Key, app_state: &AppState) -> Foc
     match key {
         Key::Escape => FocusAction::Escape,
         Key::Enter => FocusAction::Activate,
-        Key::Space => FocusAction::PlayPauseToggle,
+        // NOTE: Space is NOT handled here. The app dispatches Space
+        // directly to the context-menu opener in `app.rs` (keys.2 ->
+        // maybe_open_context_menu_for_focus). This function is only ever
+        // called with `Key::Escape`, so any Space arm would be dead and
+        // misleading. Do not re-add `Key::Space => ...` here.
         _ => FocusAction::None,
     }
 }

@@ -54,7 +54,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     // (mpv play command sent in app.rs playback logic)
                 }
                 if ui
-                    .add_sized([120.0, 36.0], egui::Button::new("\u{25B6}\u{25B6} Shuffle"))
+                    .add_sized([120.0, 36.0], egui::Button::new("\u{1f500} Shuffle"))
                     .clicked()
                 {
                     let mut tracks = state.current_album_tracks.clone();
