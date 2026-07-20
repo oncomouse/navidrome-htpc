@@ -5,7 +5,10 @@ use crate::theme::*;
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
     egui::TopBottomPanel::bottom("transport").show(ctx, |ui| {
         ui.add_space(8.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.horizontal(|ui| {
+            // Left spacer to avoid overlapping the hamburger menu
+            // positioned at (16, screen_bottom - 60) in menu.rs.
+            ui.add_space(64.0);
             // Transport buttons (painter-based)
             let buttons = [
                 ("\u{23EE}", 0), // Prev
