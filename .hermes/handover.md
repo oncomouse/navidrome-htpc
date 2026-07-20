@@ -105,6 +105,11 @@ restart from the beginning.
     this). Don't do this unprompted — it's an architectural change.
 - **No virtualized rendering:** large lists (10k+ artists) render all items.
 - **No queue persistence:** queue is lost on app restart.
+- **Transport bar visibility (2026-07-20):** Prev/Play/Stop/Next +
+  progress slider are hidden unless `state.current_track_index.is_some()`
+  (gated in `src/ui/transport.rs` render). Volume stays always
+  visible. When empty, `FocusZone::Transport` bounces to Content
+  so keyboard focus isn't trapped. (Todo item #2 done.)
 - **Wizard backends:** `self.subsonic` / `self.mpv` are `Some` after
   post-wizard init, but `SubsonicClient::start` with wrong credentials returns a
   broken handle silently (client=None, worker thread not spawned). No retry

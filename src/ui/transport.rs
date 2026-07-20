@@ -9,57 +9,69 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
             // Left spacer to avoid overlapping the hamburger menu
             // positioned at (16, screen_bottom - 60) in menu.rs.
             ui.add_space(64.0);
-            // Transport buttons (painter-based)
-            let buttons = [
-                ("\u{23EE}", 0), // Prev
-                (if state.is_playing { "\u{23F8}" } else { "\u{25B6}" }, 1), // Play/Pause
-                ("\u{23F9}", 2), // Stop
-                ("\u{23ED}", 3), // Next
-            ];
-            for (label, idx) in buttons {
-                let focused = state.focus.zone == FocusZone::Transport && state.focus.transport_index == idx;
-                let (rect, resp) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::click());
-                let bg = if focused {
-                    BG_FOCUS
-                } else if resp.hovered() {
-                    BG_HOVER
+            // Transport buttons + progress slider are only shown when a track
+            // is loaded (`current_track_index.is_some()`). When nothing is
+            // loaded we hide them so the bar shows only Volume. We key off
+            // `current_track_index` rather than `is_playing` so the controls
+            // stay visible while paused mid-track (a loaded track is still
+            // "something playing" in the user's mental model).
+            if state.current_track_index.is_some() {
+                let buttons = [
+                    ("\u{23EE}", 0), // Prev
+                    (if state.is_playing { "\u{23F8}" } else { "\u{25B6}" }, 1), // Play/Pause
+                    ("\u{23F9}", 2), // Stop
+                    ("\u{23ED}", 3), // Next
+                ];
+                for (label, idx) in buttons {
+                    let focused = state.focus.zone == FocusZone::Transport && state.focus.transport_index == idx;
+                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::click());
+                    let bg = if focused {
+                        BG_FOCUS
+                    } else if resp.hovered() {
+                        BG_HOVER
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    if bg != egui::Color32::TRANSPARENT {
+                        ui.painter().rect_filled(rect, 8.0, bg);
+                    }
+                    if focused {
+                        ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(2.0, ACCENT));
+                    }
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        label,
+                        egui::TextStyle::Heading.resolve(ui.style()),
+                        TEXT_PRIMARY,
+                    );
+                    if resp.clicked_by(egui::PointerButton::Primary) {
+                        handle_transport_click(idx, state);
+                    }
+                }
+
+                ui.add_space(24.0);
+
+                // Progress slider
+                let progress = if state.total_duration > 0.0 {
+                    state.current_time / state.total_duration
                 } else {
-                    egui::Color32::TRANSPARENT
+                    0.0
                 };
-                if bg != egui::Color32::TRANSPARENT {
-                    ui.painter().rect_filled(rect, 8.0, bg);
+                let mut seek = progress;
+                ui.add_sized([200.0, 20.0], egui::Slider::new(&mut seek, 0.0..=1.0).show_value(false));
+                if (seek - progress).abs() > 0.001 {
+                    // TODO: send seek to mpv
+                    state.current_time = seek * state.total_duration;
                 }
-                if focused {
-                    ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(2.0, ACCENT));
-                }
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    label,
-                    egui::TextStyle::Heading.resolve(ui.style()),
-                    TEXT_PRIMARY,
-                );
-                if resp.clicked_by(egui::PointerButton::Primary) {
-                    handle_transport_click(idx, state);
-                }
+
+                ui.add_space(24.0);
+            } else if state.focus.zone == FocusZone::Transport {
+                // No transport controls are rendered when nothing is loaded,
+                // so the Transport focus zone would trap keyboard focus
+                // with nothing to land on. Bounce it back to Content.
+                state.focus.zone = FocusZone::Content;
             }
-
-            ui.add_space(24.0);
-
-            // Progress slider
-            let progress = if state.total_duration > 0.0 {
-                state.current_time / state.total_duration
-            } else {
-                0.0
-            };
-            let mut seek = progress;
-            ui.add_sized([200.0, 20.0], egui::Slider::new(&mut seek, 0.0..=1.0).show_value(false));
-            if (seek - progress).abs() > 0.001 {
-                // TODO: send seek to mpv
-                state.current_time = seek * state.total_duration;
-            }
-
-            ui.add_space(24.0);
 
             // Volume slider
             let mut vol = state.volume;
