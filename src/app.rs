@@ -271,7 +271,7 @@ impl eframe::App for NavidromeApp {
             Some(egui::Key::ArrowDown)
         } else if keys.5 {
             Some(egui::Key::ArrowLeft)
-        } else if keys.6 && self.state.focus.zone != FocusZone::Content {
+        } else if keys.6 {
             Some(egui::Key::ArrowRight)
         } else {
             None
@@ -292,9 +292,9 @@ impl eframe::App for NavidromeApp {
             self.state.focus = focus;
         }
 
-        // ── Context menu: open on Right arrow when focused on a card/track ────
+        // ── Context menu: open on Space when focused on a card/track ──────────
         // (only when the flyout isn't already open — it handles its own keys)
-        if keys.6 && self.state.focus.zone == FocusZone::Content && !self.context_menu.open {
+        if keys.2 && self.state.focus.zone == FocusZone::Content && !self.context_menu.open {
             self.maybe_open_context_menu_for_focus();
         }
 

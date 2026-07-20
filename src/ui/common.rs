@@ -329,7 +329,7 @@ pub fn render_context_menu(
         .fixed_pos(pos)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            let items = ["\u{25B6} Play Now", "\u{25B6}\u{25B6} Shuffle Play", "+ Add to Queue"];
+            let items = ["\u{25b6} Play Now", "\u{1f500} Shuffle Play", "+ Add to Queue"];
             for (i, label) in items.iter().enumerate() {
                 let (rect, resp) = ui.allocate_exact_size(
                     egui::vec2(200.0, 40.0),
