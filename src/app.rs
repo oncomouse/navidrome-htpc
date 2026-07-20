@@ -561,7 +561,35 @@ impl eframe::App for NavidromeApp {
             {
                 self.state.push_view(View::NowPlaying);
             }
-        }
+
+            // ── Pending transport actions ──────────────────────────────────────
+            //
+            // The transport bar click handler sets `pending_transport_action`
+            // when the user clicks play/pause/stop/next/previous. We consume it
+            // here, inside the mpv block where we have access to the mpv
+            // command channel. This is the only place mpv commands can be sent.
+            if let Some(action) = self.state.pending_transport_action.take() {
+                match action {
+                    crate::state::TransportAction::Play => {
+                        mpv.send(crate::mpv::MpvCommand::Resume);
+                    }
+                    crate::state::TransportAction::Pause => {
+                        mpv.send(crate::mpv::MpvCommand::Pause);
+                    }
+                    crate::state::TransportAction::Stop => {
+                        mpv.send(crate::mpv::MpvCommand::Stop);
+                    }
+                    crate::state::TransportAction::Next
+                    | crate::state::TransportAction::Previous => {
+                        // Stop the current track; the initial-play detection
+                        // on the next frame will pick up the new track index
+                        // (already set by the transport click handler) and
+                        // send its URL to mpv.
+                        mpv.send(crate::mpv::MpvCommand::Stop);
+                    }
+                }
+            }
+        }  // end if let Some(ref mpv)
     }
 }
 

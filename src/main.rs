@@ -63,6 +63,7 @@ fn main() -> eframe::Result<()> {
         current_time: 0.0,
         total_duration: 0.0,
         volume: 0.75,
+        pending_transport_action: None,
         toasts: Vec::new(),
         cover_textures: std::collections::HashMap::new(),
     };

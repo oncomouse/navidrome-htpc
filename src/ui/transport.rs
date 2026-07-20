@@ -1,5 +1,5 @@
 use eframe::egui;
-use crate::state::{AppState, FocusZone};
+use crate::state::{AppState, FocusZone, TransportAction};
 use crate::theme::*;
 
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
@@ -74,32 +74,44 @@ fn handle_transport_click(idx: usize, state: &mut AppState) {
     match idx {
         0 => {
             // Previous — advance to previous track in queue
-            if let Some(idx) = state.current_track_index {
-                if idx > 0 {
-                    state.current_track_index = Some(idx - 1);
+            if let Some(track_idx) = state.current_track_index {
+                if track_idx > 0 {
+                    state.current_track_index = Some(track_idx - 1);
                     state.current_time = 0.0;
+                    state.total_duration = 0.0;
                     state.is_playing = true;
+                    state.pending_transport_action = Some(TransportAction::Previous);
                 }
             }
         }
         1 => {
             // Play/Pause toggle
-            state.is_playing = !state.is_playing;
+            if state.is_playing {
+                state.is_playing = false;
+                state.pending_transport_action = Some(TransportAction::Pause);
+            } else {
+                state.is_playing = true;
+                state.pending_transport_action = Some(TransportAction::Play);
+            }
         }
         2 => {
             // Stop
             state.is_playing = false;
             state.current_track_index = None;
             state.current_time = 0.0;
+            state.total_duration = 0.0;
+            state.pending_transport_action = Some(TransportAction::Stop);
         }
         3 => {
             // Next — advance to next track in queue
-            if let Some(idx) = state.current_track_index {
-                let next = idx + 1;
+            if let Some(track_idx) = state.current_track_index {
+                let next = track_idx + 1;
                 if next < state.play_queue.len() {
                     state.current_track_index = Some(next);
                     state.current_time = 0.0;
+                    state.total_duration = 0.0;
                     state.is_playing = true;
+                    state.pending_transport_action = Some(TransportAction::Next);
                 }
             }
         }

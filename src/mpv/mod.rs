@@ -181,6 +181,12 @@ fn run_mpv_loop(
 
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
+
+    // Kill the mpv subprocess when the loop exits (app shutting down, socket
+    // closed, or mpv crashed). Without this the child process survives as a
+    // zombie that keeps playing audio indefinitely.
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn handle_mpv_event(event: &str, val: &serde_json::Value, state: &Arc<RwLock<MpvState>>) {

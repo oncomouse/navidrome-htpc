@@ -16,6 +16,24 @@ pub enum View {
     Settings,
 }
 
+/// A user action from the transport bar that must be forwarded to the mpv
+/// thread. The transport click handler sets this as a pending action; the
+/// mpv poll block in `app.rs` reads it, sends the corresponding mpv
+/// command, and clears it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransportAction {
+    /// Resume playback (un-pause)
+    Play,
+    /// Pause playback
+    Pause,
+    /// Stop playback and unload the current file
+    Stop,
+    /// Advance to the next track in the queue
+    Next,
+    /// Go back to the previous track
+    Previous,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FocusZone {
     Content,
@@ -96,6 +114,10 @@ pub struct AppState {
     pub current_time: f32,
     pub total_duration: f32,
     pub volume: f32,
+    /// Pending action from the transport bar that the mpv poll block should
+    /// execute on the next frame. Set by `transport::render` when the user
+    /// clicks a transport button; consumed by the mpv block in `app.rs`.
+    pub pending_transport_action: Option<TransportAction>,
 
     // UI state
     pub toasts: Vec<Toast>,
