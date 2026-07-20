@@ -346,7 +346,15 @@ impl eframe::App for NavidromeApp {
             // Initial play detection: the UI set is_playing=true (e.g. from
             // album_detail Play button) but mpv hasn't started yet (no
             // current_time, not playing). Send the first track's URL to mpv.
-            if self.state.is_playing
+            //
+            // CRITICAL: we check `was_playing` (the pre-poll value, true when
+            // the click handler just set it) instead of `self.state.is_playing`
+            // (which was just overwritten by mpv's idle state in the poll
+            // above). Without this guard the initial play fires but then the
+            // track-end check below also fires on the same frame because
+            // `was_playing` is true and mpv hasn't started yet — advancing
+            // past track 0 and skipping the first track entirely.
+            if was_playing
                 && !mpv_state.is_playing
                 && self.state.current_time == 0.0
                 && self.state.total_duration == 0.0
