@@ -20,7 +20,18 @@ initial-play, track-end, and auto-switch. Each action now directly sets
 - Arrows = focus navigation (Up/Down/Left/Right)
 - Enter = activate (Home cards, album thumbs, track lists, artist/playlist lists)
 - Space = context menu (replaced Right arrow per user request)
-- Shuffle icon changed from `▶▶` to `🔀` (U+1F500)
+  - **INCONSISTENCY (verified 2026-07-20):** `app.rs:297` opens the
+    context menu on Space, which is correct. But `focus.rs:24` still maps
+    `Key::Space => FocusAction::PlayPauseToggle`, and that `handle_key`
+    branch is **dead** — `handle_key` is only ever called with `Key::Escape`
+    (app.rs:252). The `PlayPauseToggle`/`Space` mapping in focus.rs is
+    misleading leftover code; Space does NOT toggle play/pause.
+- **Shuffle icon PARTIALLY STALE (verified 2026-07-20):** the context
+  menu uses `🔀` (U+1F500) at `common.rs:332`, but the detail-view
+  header buttons STILL use `▶▶` — `album_detail.rs:57` and
+  `playlist_detail.rs:26` both render `"\u{25B6}\u{25B6} Shuffle"`.
+  So the "changed from `▶▶` to `🔀`" claim is only half-true; the
+  detail buttons were never updated. Two different shuffle glyphs ship.
 
 ### mpv IPC non-blocking (4c4fb7495)
 - 100ms read timeout on UnixStream so commands are processed even when mpv is idle
