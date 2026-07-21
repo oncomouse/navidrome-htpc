@@ -34,7 +34,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     let album = &albums[idx];
                     let focused = state.focus.zone == FocusZone::Content && state.focus.content_row == idx;
                     let tex = state.cover_textures.get(&album.id);
-                    if common::render_album_thumbnail(ui, album, focused, tex) {
+                    if common::render_album_thumbnail(ui, album, focused, tex).0 {
                         state.current_album = Some(album.clone());
                         state.current_album_tracks.clear();
                         state.push_view(View::AlbumDetail);

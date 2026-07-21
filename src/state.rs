@@ -124,6 +124,11 @@ pub struct AppState {
     /// so we only re-scroll when the current track actually changes
     /// (not every frame — that would fight manual queue scrolling).
     pub last_scrolled_track: Option<usize>,
+    /// Last `(content_row, content_col)` the Home view auto-scrolled a
+    /// horizontal album row to, so we only re-scroll when keyboard focus
+    /// actually moves to a different album (not every frame — that would
+    /// fight the user's manual horizontal scrolling of the row).
+    pub last_scrolled_home: Option<(usize, usize)>,
     pub is_playing: bool,
     /// Play/pause state the user last requested via the transport bar. While
     /// `Some`, the transport button renders from this intended value instead

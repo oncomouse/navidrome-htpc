@@ -61,6 +61,7 @@ fn main() -> eframe::Result<()> {
         current_track_index: None,
         last_played_track_index: None,
         last_scrolled_track: None,
+        last_scrolled_home: None,
         is_playing: false,
         intended_playing: None,
         intent_frames_remaining: 0,

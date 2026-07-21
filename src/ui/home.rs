@@ -35,6 +35,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             .color(crate::theme::TEXT_PRIMARY),
     );
     ui.add_space(8.0);
+    let mut scroll_to_added: Option<egui::Rect> = None;
     egui::ScrollArea::horizontal()
         .id_salt("recent_added")
         .show(ui, |ui| {
@@ -49,13 +50,28 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                         && state.focus.content_row == 1
                         && state.focus.content_col == i;
                     let tex = state.cover_textures.get(&cover_ids[i]);
-                    if common::render_album_thumbnail(ui, album, focused, tex) {
+                    let (clicked, rect) =
+                        common::render_album_thumbnail(ui, album, focused, tex);
+                    if clicked {
                         state.current_album = Some(album.clone());
                         state.push_view(View::AlbumDetail);
+                    }
+                    if focused {
+                        scroll_to_added = Some(rect);
                     }
                 }
             });
         });
+    // Auto-scroll the row so the keyboard-focused thumbnail stays in view —
+    // but only when focus actually moves to a different album (gated on the
+    // last-scrolled position), so we don't fight the user's manual scrolling.
+    if let Some(rect) = scroll_to_added {
+        let key = (1usize, state.focus.content_col);
+        if state.last_scrolled_home != Some(key) {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            state.last_scrolled_home = Some(key);
+        }
+    }
 
     // Row 3: Recently Played (horizontal scroll)
     ui.add_space(32.0);
@@ -65,6 +81,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             .color(crate::theme::TEXT_PRIMARY),
     );
     ui.add_space(8.0);
+    let mut scroll_to_played: Option<egui::Rect> = None;
     egui::ScrollArea::horizontal()
         .id_salt("recent_played")
         .show(ui, |ui| {
@@ -79,11 +96,24 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                         && state.focus.content_row == 2
                         && state.focus.content_col == i;
                     let tex = state.cover_textures.get(&cover_ids[i]);
-                    if common::render_album_thumbnail(ui, album, focused, tex) {
+                    let (clicked, rect) =
+                        common::render_album_thumbnail(ui, album, focused, tex);
+                    if clicked {
                         state.current_album = Some(album.clone());
                         state.push_view(View::AlbumDetail);
+                    }
+                    if focused {
+                        scroll_to_played = Some(rect);
                     }
                 }
             });
         });
+    // Same gated auto-scroll for the Recently Played row.
+    if let Some(rect) = scroll_to_played {
+        let key = (2usize, state.focus.content_col);
+        if state.last_scrolled_home != Some(key) {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            state.last_scrolled_home = Some(key);
+        }
+    }
 }

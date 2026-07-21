@@ -66,7 +66,11 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
                             egui::TextStyle::Body.resolve(ui.style()),
                             TEXT_PRIMARY,
                         );
-                        if resp.clicked_by(egui::PointerButton::Primary) {
+                        if resp.clicked_by(egui::PointerButton::Primary)
+                            || (state.focus.zone == FocusZone::Menu
+                                && state.focus.menu_index == i
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        {
                             match i {
                                 0 => state.push_view(View::Search),
                                 1 => state.push_view(View::Settings),

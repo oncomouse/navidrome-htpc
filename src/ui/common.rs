@@ -33,13 +33,17 @@ pub fn render_card(
     resp.clicked_by(egui::PointerButton::Primary)
 }
 
-/// Render an album thumbnail (cover art + name) — painter-based
+/// Render an album thumbnail (cover art + name) — painter-based.
+///
+/// Returns `(clicked, rect)` where `rect` is the allocated screen-space
+/// rectangle. Callers that render inside a `ScrollArea` can use `rect` with
+/// `ui.scroll_to_rect` to keep the keyboard-focused thumbnail in view.
 pub fn render_album_thumbnail(
     ui: &mut egui::Ui,
     album: &crate::subsonic::models::Album,
     focused: bool,
     cover_texture: Option<&egui::TextureHandle>,
-) -> bool {
+) -> (bool, egui::Rect) {
     let size = egui::vec2(160.0, 200.0);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
 
@@ -96,7 +100,7 @@ pub fn render_album_thumbnail(
         TEXT_SECONDARY,
     );
 
-    resp.clicked_by(egui::PointerButton::Primary)
+    (resp.clicked_by(egui::PointerButton::Primary), rect)
 }
 
 /// Render a detail-view header action button (Play / Shuffle / Add to Queue).
